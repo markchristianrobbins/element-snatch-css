@@ -1,6 +1,6 @@
 /**
  * Element Snatch CSS
- * Ctrl + Middle-click opens a Menu listing ancestors from <body> down to the clicked element.
+ * Ctrl + Shift + Middle-click opens a Menu listing ancestors from <body> down to the clicked element.
  * Hovering a menu item highlights its element. Clicking generates nested CSS from that element
  * (including all descendants) and copies it to the clipboard..
  *
@@ -22,14 +22,23 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 	// Handle Ctrl + Middle click
 	_onMouseDown(e) {
+		console.log("[element-snatch-css] mousedown", e);
 		try {
 			const isMiddle = e.button === 1;
 			const wantMod = e.ctrlKey || e.metaKey;
-			if (isMiddle && e.ctrlKey && !e.altKey && !e.shiftKey) {
+			if (isMiddle && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+		       console.log("[element-snatch-css] mousedown OK", e);
 				e.preventDefault();
 				e.stopPropagation();
 				const target = (e.target && e.target.closest && e.target.closest("*")) || e.target || document.body;
-				this._openMenuFor(target, e);
+				this._openMenuForCss(target, e, target);
+			}
+			if (isMiddle && (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
+		       console.log("[element-snatch-css] mousedown OK", e);
+				e.preventDefault();
+				e.stopPropagation();
+				const target = (e.target && e.target.closest && e.target.closest("*")) || e.target || document.body;
+				this._openMenuForPath(target, e, target);
 			}
 
 		} catch (err) {
@@ -49,6 +58,39 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		}
 		chain.reverse(); // body first
 		return chain;
+	}
+
+	// Build descendant and child selector paths from ancestor -> target
+	_buildPathsBetween(ancestor, target, options) {
+		const opts = Object.assign({
+			useIds: true,
+			useClasses: true,
+			includeTagIfNoClasses: true,
+			includeNthChild: false
+		}, options || {});
+
+		if (!ancestor || !target) return { descendant: "", child: "" };
+		// Ascend from target to ancestor, collecting elements
+		const chain = [];
+		let cur = target;
+		let guard = 0;
+		while (cur && cur.nodeType === 1 && guard++ < 2000) {
+			chain.push(cur);
+			if (cur === ancestor) break;
+			cur = cur.parentElement;
+		}
+		if (chain[chain.length - 1] !== ancestor) {
+			// ancestor is not actually an ancestor of target; fall back to ancestry from body
+			const bodyChain = this._buildAncestry(target, document.body);
+			const idx = bodyChain.indexOf(ancestor);
+			if (idx >= 0) chain.splice(idx + 1); // trim
+		}
+		chain.reverse(); // ancestor -> ... -> target
+		const sels = chain.map((n) => this._selectorFor(n, opts));
+		return {
+			descendant: sels.join(" "),
+			child: sels.join(" > ")
+		};
 	}
 
 	// Human-readable label: tag#id.class1.class2 [+N]
@@ -81,7 +123,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 
 	// Show Menu at mouse position with body at top and target at bottom
-	_openMenuFor(targetEl, mouseEvt) {
+	_openMenuForCss(targetEl, mouseEvt, originalTargetEl) {
 		const chain = this._buildAncestry(targetEl, document.body);
 		if (!chain.length) return;
 
@@ -102,6 +144,88 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 						maxDepth: Infinity,
 						maxNodes: 5000
 					});
+				});
+
+				const dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
+				if (dom) {
+					dom.addEventListener("mouseenter", () => this._highlight(el, true));
+					dom.addEventListener("mouseleave", () => this._highlight(el, false));
+				}
+			});
+		}
+
+		if (typeof menu.showAtMouseEvent === "function") {
+			menu.showAtMouseEvent(mouseEvt);
+		} else if (typeof menu.showAtPosition === "function") {
+			menu.showAtPosition({ x: mouseEvt.clientX, y: mouseEvt.clientY });
+		} else {
+			menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+		}
+
+		// Cleanup highlights when the menu disappears
+		setTimeout(() => {
+			const menuEl = document.querySelector(".menu");
+			if (!menuEl) return;
+			const obs = new MutationObserver(() => {
+				if (!document.body.contains(menuEl)) {
+					try { obs.disconnect(); } catch { }
+					clearAll();
+				}
+			});
+			obs.observe(document.body, { childList: true, subtree: true });
+		}, 0);
+	}
+
+	// Build two selector strings between ancestorEl (inclusive) and targetEl (inclusive).
+	_buildPathsBetween(ancestorEl, targetEl, options) {
+		const opts = Object.assign({ includeNthChild: false }, options || {});
+		if (!ancestorEl || !targetEl) return { descendant: "", child: "" };
+		// Walk up from target to ancestor
+		const chain = [];
+		let cur = targetEl;
+		let guard = 0;
+		while (cur && cur.nodeType === 1 && guard++ < 5000) {
+			chain.push(cur);
+			if (cur === ancestorEl) break;
+			cur = cur.parentElement;
+		}
+		if (chain[chain.length - 1] !== ancestorEl) {
+			// ancestorEl is not actually an ancestor; fallback to just target
+			chain.push(ancestorEl);
+		}
+		chain.reverse(); // ancestor -> ... -> target
+		const sels = chain.map((n) => this._selectorFor(n, {
+			useIds: true,
+			useClasses: true,
+			includeTagIfNoClasses: true,
+			includeNthChild: !!opts.includeNthChild
+		}));
+		return {
+			descendant: sels.join(" "),
+			child: sels.join(" > ")
+		};
+	}
+
+	// Show ancestor menu for PATH copying (between chosen ancestor and originalTargetEl)
+	_openMenuForPath(targetEl, mouseEvt, originalTargetEl) {
+		const chain = this._buildAncestry(targetEl, document.body);
+		if (!chain.length) return;
+
+		const menu = new Menu(this.app);
+		const clearAll = () => chain.forEach((n) => this._highlight(n, false));
+
+		for (const el of chain) {
+			const label = this._labelFor(el, 3, true);
+			menu.addItem((item) => {
+				item.setTitle(label);
+				item.setIcon("chevrons-right");
+				item.onClick(async () => {
+					clearAll();
+					const paths = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
+					const text = paths.descendant + '\n' + paths.child + '\n';
+					const ok = await this._copyText(text);
+					try { new Notice(ok ? "Path copied" : "Copy failed", ok ? 1200 : 2000); } catch { }
+					if (!ok) console.log(text);
 				});
 
 				const dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
