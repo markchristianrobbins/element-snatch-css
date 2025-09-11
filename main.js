@@ -185,9 +185,83 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 	/**
 	 * Build a nested CSS tree starting at root and including all descendants.
+	 * For each level, emit two content lines:
+	 *  - descendant path: "A B C"
+	 *  - child path:      "A > B > C"
 	 * Copies the result to clipboard, shows a Notice, and returns the text.
 	 */
 	async _css(root, options) {
+		const opts = Object.assign({
+			useIds: true,
+			useClasses: true,
+			includeTagIfNoClasses: true,
+			includeNthChild: false,
+			indent: "  ",
+			maxDepth: Infinity,
+			maxNodes: 5000,
+			skipTags: new Set(["SCRIPT", "STYLE", "TEMPLATE"])
+		}, options || {});
+
+		if (!root || root.nodeType !== 1) {
+			console.warn("[element-snatch-css] _css called without a valid element");
+			return "";
+		}
+
+		let out = "";
+		let nodeCount = 0;
+		let truncated = false;
+
+		const selectorFor = (n) => this._selectorFor(n, opts);
+
+		/**
+		 * @param {Element} node
+		 * @param {number} depth
+		 * @param {string[]} pathSelectors - selectors from root -> this node
+		 */
+		const walk = (node, depth, pathSelectors) => {
+			if (depth > opts.maxDepth) return;
+			if (++nodeCount > opts.maxNodes) { truncated = true; return; }
+
+			const curSel = pathSelectors[pathSelectors.length - 1];
+
+			// Open current block with the short selector (nested style)
+			out += opts.indent.repeat(depth) + curSel + " {\n";
+
+			// Emit content lines for both descendant and child chains
+			const descPath = pathSelectors.join(" ");
+			const childPath = pathSelectors.join(" > ");
+			out += opts.indent.repeat(depth + 1) + 'content: "' + descPath + '";\n';
+			out += opts.indent.repeat(depth + 1) + 'content: "' + childPath + '";\n';
+
+			// Recurse into element children
+			for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
+				if (opts.skipTags && opts.skipTags.has(child.tagName)) continue;
+				const childSel = selectorFor(child);
+				walk(child, depth + 1, pathSelectors.concat(childSel));
+				if (truncated) break;
+			}
+
+			// Close block
+			out += opts.indent.repeat(depth) + "}\n";
+		};
+
+		// Kick off from root
+		const rootSel = selectorFor(root);
+		walk(root, 0, [rootSel]);
+
+		if (truncated) out += "/* truncated: reached maxNodes limit */\n";
+
+		const ok = await this._copyText(out);
+		try { new Notice(ok ? "Nested CSS copied" : "Copy failed", ok ? 1200 : 2000); } catch { }
+		if (!ok) console.log(out);
+		return out;
+	}
+
+	/**
+	 * Build a nested CSS tree starting at root and including all descendants.
+	 * Copies the result to clipboard, shows a Notice, and returns the text.
+	 */
+	async _css_(root, options) {
 		const opts = Object.assign({
 			useIds: true,
 			useClasses: true,
