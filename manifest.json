@@ -1,0 +1,11 @@
+{
+  "id": "element-snatch-css",
+  "name": "Element Snatch CSS",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Ctrl+Middle-click to open a menu of element ancestors and copy nested CSS for any item.",
+  "author": "ElementSnatch",
+  "authorUrl": "",
+  "isDesktopOnly": false,
+  "main": "main.js"
+}
