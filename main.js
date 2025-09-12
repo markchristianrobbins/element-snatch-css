@@ -298,7 +298,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 						clearAll();
 						await this._css(el, {
 							includeNthChild: false,
-							indent: "  ",
+							indent: "\t",
 							maxDepth: Infinity,
 							maxNodes: 5000
 						});
