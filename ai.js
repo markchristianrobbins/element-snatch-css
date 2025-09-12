@@ -36,6 +36,7 @@ change the style of the hightlight to a dotted border of 2px and a semi-transpar
 the border color will be a hue-rotation. slowly changing color.
 the highlighted element will have its contrast increased.
 `;
+
 const noticesAndMenuTitleTasks= `
 this file works.
 control the life of my Notice calls by creating a Noticer class uses a timeout to dispose of the Notice after a set time.

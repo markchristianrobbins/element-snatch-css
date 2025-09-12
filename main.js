@@ -9,14 +9,48 @@
 
 const { Plugin, Menu, Notice } = require("obsidian");
 
+/**
+ * Noticer: controls the lifetime of Obsidian Notice with precise timing.
+ * Supports many instances concurrently.
+ */
+class Noticer {
+	constructor() {
+		this._n = null;
+		this._t = null;
+		Noticer._all.add(this);
+	}
+	show(message, timeout) {
+		const ms = Number.isFinite(timeout) ? Math.max(0, timeout|0) : 3000;
+		this.dispose();
+		try { this._n = new Notice(String(message || ""), 0); } catch { this._n = null; }
+		if (ms > 0) this._t = setTimeout(() => { try { this.dispose(); } catch {} }, ms);
+		return this;
+	}
+	dispose() {
+		if (this._t) { try { clearTimeout(this._t); } catch {} ; this._t = null; }
+		if (this._n && typeof this._n.hide === "function") { try { this._n.hide(); } catch {} }
+		this._n = null;
+		Noticer._all.delete(this);
+		return this;
+	}
+	isActive() { return !!this._n; }
+	static getNoticers() { return Array.from(Noticer._all); }
+	static disposeAll() { for (const n of Array.from(Noticer._all)) { try { n.dispose(); } catch {} } }
+}
+Noticer._all = new Set();
+
+
 module.exports = class ElementSnatchCssPlugin extends Plugin {
 	onload() {
+		/** track multiple notices */
+		this._noticers = new Set();
 		this._onMouseDown = this._onMouseDown.bind(this);
 		this.registerDomEvent(document, "mousedown", this._onMouseDown, { capture: true });
 		console.log("[element-snatch-css] loaded");
 	}
 
 	onunload() {
+		try { Noticer.disposeAll(); } catch {}
 		console.log("[element-snatch-css] unloaded");
 	}
 
@@ -192,10 +226,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 	// Apply or remove highlight on a DOM element
 	_highlight(el, on) {
-		// Overlay-based highlighter + contrast boost on the element itself.
+		// Overlay-based highlighter: reuse a singleton DIV instead of mutating target styles.
 		if (!el || el.nodeType !== 1) return;
 		if (on) {
-			// place overlay
 			this._placeHighlighter(el);
 			// boost contrast on the element (store previous filter)
 			if (!Object.prototype.hasOwnProperty.call(el, "__esc_prevFilter")) {
@@ -324,7 +357,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 					const paths = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
 					const text = paths.descendant + '\n' + paths.child + '\n';
 					const ok = await this._copyText(text);
-					try { new Notice(ok ? "Path copied" : "Copy failed", ok ? 1200 : 2000); } catch { }
+					try { this._withNotice(ok ? "Path copied" : "Copy failed", ok ? 5000 : 10000); } catch { }
 					if (!ok) console.log(text);
 				});
 
@@ -476,7 +509,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (truncated) out += "/* truncated: reached maxNodes limit */\n";
 
 		const ok = await this._copyText(out);
-		try { new Notice(ok ? "Nested CSS copied" : "Copy failed", ok ? 1200 : 2000); } catch { }
+		try { this._withNotice(ok ? "Nested CSS copied" : "Copy failed", ok ? 5000 : 10000); } catch { }
 		if (!ok) console.log(out);
 		return out;
 	}
@@ -523,8 +556,20 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (truncated) out += "/* truncated: reached maxNodes limit */\n";
 
 		const ok = await this._copyText(out);
-		try { new Notice(ok ? "Nested CSS copied" : "Copy failed", ok ? 1200 : 2000); } catch { }
+		try { this._withNotice(ok ? "Nested CSS copied" : "Copy failed", ok ? 5000 : 10000); } catch { }
 		if (!ok) console.log(out);
 		return out;
+	}
+
+
+	/**
+	 * Show a timed Notice via a fresh Noticer instance and register it in the plugin set.
+	 */
+	_withNotice(message, timeoutMs) {
+		const n = new Noticer().show(message, timeoutMs);
+		this._noticers.add(n);
+		// when it disposes, remove from set (best-effort via timeout)
+		setTimeout(() => { this._noticers.delete(n); }, (Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs|0) : 3000) + 1000);
+		return n;
 	}
 };
