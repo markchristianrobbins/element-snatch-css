@@ -2,7 +2,12 @@
  * Element Snatch CSS
  * Ctrl + Shift + Middle-click opens a Menu listing ancestors from <body> down to the clicked element.
  * Hovering a menu item highlights its element. Clicking generates nested CSS from that element
- * (including all descendants) and copies it to the clipboard..
+ * (including all descendants) and copies it to the clipboard.
+ * Ctrl + Middle-click opens a Menu listing ancestors from <body> down to the clicked element.
+ * Hovering a menu item highlights its element. Clicking generates a concise CSS path to that element
+ * and copies it to the clipboard.
+ *
+ * https://chatgpt.com/g/g-p-68c3519c39288191ab2af2452df299ae-obs-pi/c/68c3572f-3770-8325-b8f9-a4b1b13210be
  *
  * No execCommand fallback is used for clipboard.
  */
