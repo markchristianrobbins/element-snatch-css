@@ -1,1 +1,11 @@
 /* element-snatch-css styles (optional) */
+/* Don't hide our header/rows even if a theme expects both icon + title */
+
+body .menu-item:has( > .menu-item-title:empty, > .menu-item-icon:empty ):not( :has( .setting-item ) ) {
+	display: flex !important;
+}
+
+body .menu .esc-menu-title,
+body .menu .menu-item.esc-force-show {
+    display: flex !important;
+}

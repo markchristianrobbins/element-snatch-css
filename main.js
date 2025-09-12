@@ -20,22 +20,22 @@ class Noticer {
 		Noticer._all.add(this);
 	}
 	show(message, timeout) {
-		const ms = Number.isFinite(timeout) ? Math.max(0, timeout|0) : 3000;
+		const ms = Number.isFinite(timeout) ? Math.max(0, timeout | 0) : 3000;
 		this.dispose();
 		try { this._n = new Notice(String(message || ""), 0); } catch { this._n = null; }
-		if (ms > 0) this._t = setTimeout(() => { try { this.dispose(); } catch {} }, ms);
+		if (ms > 0) this._t = setTimeout(() => { try { this.dispose(); } catch { } }, ms);
 		return this;
 	}
 	dispose() {
-		if (this._t) { try { clearTimeout(this._t); } catch {} ; this._t = null; }
-		if (this._n && typeof this._n.hide === "function") { try { this._n.hide(); } catch {} }
+		if (this._t) { try { clearTimeout(this._t); } catch { }; this._t = null; }
+		if (this._n && typeof this._n.hide === "function") { try { this._n.hide(); } catch { } }
 		this._n = null;
 		Noticer._all.delete(this);
 		return this;
 	}
 	isActive() { return !!this._n; }
 	static getNoticers() { return Array.from(Noticer._all); }
-	static disposeAll() { for (const n of Array.from(Noticer._all)) { try { n.dispose(); } catch {} } }
+	static disposeAll() { for (const n of Array.from(Noticer._all)) { try { n.dispose(); } catch { } } }
 }
 Noticer._all = new Set();
 
@@ -50,8 +50,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 
 	onunload() {
-		try { Noticer.disposeAll(); } catch {}
+		try { Noticer.disposeAll(); } catch { }
 		console.log("[element-snatch-css] unloaded");
+		this._disposeHighlighter();
 	}
 
 	// Handle Ctrl + Middle click
@@ -61,14 +62,14 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			const isMiddle = e.button === 1;
 			const wantMod = e.ctrlKey || e.metaKey;
 			if (isMiddle && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-		       console.log("[element-snatch-css] mousedown OK", e);
+				console.log("[element-snatch-css] mousedown OK _openMenuForCss", e);
 				e.preventDefault();
 				e.stopPropagation();
 				const target = (e.target && e.target.closest && e.target.closest("*")) || e.target || document.body;
 				this._openMenuForCss(target, e, target);
 			}
 			if (isMiddle && (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
-		       console.log("[element-snatch-css] mousedown OK", e);
+				console.log("[element-snatch-css] mousedown OK _openMenuForPath", e);
 				e.preventDefault();
 				e.stopPropagation();
 				const target = (e.target && e.target.closest && e.target.closest("*")) || e.target || document.body;
@@ -204,7 +205,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			d.style.width = Math.max(0, r.width + 4) + "px";
 			d.style.height = Math.max(0, r.height + 4) + "px";
 			this._hiTarget = el;
-		} catch {}
+		} catch { }
 	}
 
 	/**
@@ -213,11 +214,11 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	 */
 	_disposeHighlighter() {
 		if (this._hiDiv) {
-			try { this._hiDiv.remove(); } catch {}
+			try { this._hiDiv.remove(); } catch { }
 			this._hiDiv = null;
 		}
 		if (this._hiStyle) {
-			try { this._hiStyle.remove(); } catch {}
+			try { this._hiStyle.remove(); } catch { }
 			this._hiStyle = null;
 		}
 		this._hiTarget = null;
@@ -239,7 +240,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 				if (!/contrast\(/.test(cur)) {
 					el.style.filter = (cur ? cur + " " : "") + "contrast(1.25)";
 				}
-			} catch {}
+			} catch { }
 		} else {
 			// Only hide overlay if turning off the element we currently cover
 			if (this._hiTarget === el) {
@@ -261,36 +262,59 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (!chain.length) return;
 
 		const menu = new Menu(this.app);
-		// Title item (non-selectable)
+		// Title label (enabled no-op so themes can't hide it)
 		menu.addItem((item) => {
-			item.setTitle("📸 CSS menu (Ctrl+Middle)");
-			item.setDisabled(true);
+			try {
+				item.setTitle("📸 CSS menu (Ctrl+Middle)");
+				item.setIcon("code");
+				//item.onClick(() => { }); // no-op
+				const _dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
+				if (_dom) { _dom.classList.add('esc-menu-title'); _dom.setAttribute('aria-disabled', 'true'); }
+			} catch (err) {
+				console.error("[element-snatch-css] addItem failed", err);
+			}
 		});
 		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
 
+		// Ancestors
 		for (const el of chain) {
-			const label = this._labelFor(el, 3, true);
 			menu.addItem((item) => {
-				item.setTitle(label);
-				item.setIcon("chevrons-right");
-				// Tooltip describing the two selectors that will result
-				const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
-				item.setTooltip ? item.setTooltip(_pathsForTip.descendant + "\n" + _pathsForTip.child) : void 0;
-				item.onClick(async () => {
-					clearAll();
-					await this._css(el, {
-						includeNthChild: false,
-						indent: "  ",
-						maxDepth: Infinity,
-						maxNodes: 5000
-					});
-				});
+				try {
+					const label = this._labelFor(el, 3, true);
+					item.setTitle(label);
+					item.setIcon?.("chevrons-right");
 
-				const dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
-				if (dom) {
-					dom.setAttribute("title", (_pathsForTip.descendant + "\n" + _pathsForTip.child));
-					dom.addEventListener("mouseenter", () => this._highlight(el, true));
-					dom.addEventListener("mouseleave", () => this._highlight(el, false));
+					// Safe tooltip build
+					let tip = "";
+					try {
+						const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
+						tip = _pathsForTip.child.replace(/\s+/g, ' ').replace(/>/g, '\n>').trim();
+						item.setTooltip?.(tip);
+					} catch (e) {
+						console.warn("[element-snatch-css] tooltip build failed", e);
+					}
+
+					item.onClick(async () => {
+						clearAll();
+						await this._css(el, {
+							includeNthChild: false,
+							indent: "  ",
+							maxDepth: Infinity,
+							maxNodes: 5000
+						});
+					});
+
+					const dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
+					if (dom) {
+						if (tip) dom.setAttribute("title", tip);
+						dom.classList.add("esc-force-show");
+						dom.addEventListener("mouseenter", () => this._highlight(el, true));
+						dom.addEventListener("mouseleave", () => this._highlight(el, false));
+					}
+				} catch (err) {
+					console.error("[element-snatch-css] addItem failed", err);
+					// Fallback: show *something* so the menu isn't empty
+					item.setTitle(this._labelFor(el, 1, true));
 				}
 			});
 		}
@@ -353,10 +377,14 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (!chain.length) return;
 
 		const menu = new Menu(this.app);
-		// Title item (non-selectable)
+		// Title label (enabled no-op so themes don't hide disabled items)
 		menu.addItem((item) => {
 			item.setTitle("🛣️ Path menu (Ctrl+Shift+Middle)");
+			//item.onClick(() => { });
+			item.setIcon("path");
 			item.setDisabled(true);
+			const _dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
+			if (_dom) { _dom.classList.add('esc-menu-title'); _dom.setAttribute('aria-disabled','true'); }
 		});
 		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
 
@@ -379,7 +407,10 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 				const dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
 				if (dom) {
-					dom.setAttribute("title", (_pathsForTip.descendant + "\n" + _pathsForTip.child));
+					dom.classList.add("esc-force-show");
+					const desc = _pathsForTip.descendant.replace(/\s+/g, ' ').replace(/ /g, ' \n').trim();
+					const child = _pathsForTip.child.replace(/\s+/g, ' ').replace(/ >/g, ' \n>').trim();
+					dom.setAttribute("title", ("== CSS SELECTORS ==\n\nDescendant form:\n" + desc + "\n\n" + "Child form:\n" + child));
 					dom.addEventListener("mouseenter", () => this._highlight(el, true));
 					dom.addEventListener("mouseleave", () => this._highlight(el, false));
 				}
@@ -532,61 +563,13 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 
 	/**
-	 * Build a nested CSS tree starting at root and including all descendants.
-	 * Copies the result to clipboard, shows a Notice, and returns the text.
-	 */
-	async _css_(root, options) {
-		const opts = Object.assign({
-			useIds: true,
-			useClasses: true,
-			includeTagIfNoClasses: true,
-			includeNthChild: false,
-			indent: "  ",
-			maxDepth: Infinity,
-			maxNodes: 5000,
-			skipTags: new Set(["SCRIPT", "STYLE", "TEMPLATE"])
-		}, options || {});
-
-		if (!root || root.nodeType !== 1) {
-			console.warn("[element-snatch-css] _css called without a valid element");
-			return "";
-		}
-
-		let out = "";
-		let nodeCount = 0;
-		let truncated = false;
-
-		const walk = (node, depth) => {
-			if (depth > opts.maxDepth) return;
-			if (++nodeCount > opts.maxNodes) { truncated = true; return; }
-
-			out += opts.indent.repeat(depth) + this._selectorFor(node, opts) + " {\n";
-			for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
-				if (opts.skipTags && opts.skipTags.has(child.tagName)) continue;
-				walk(child, depth + 1);
-				if (truncated) break;
-			}
-			out += opts.indent.repeat(depth) + "}\n";
-		};
-
-		walk(root, 0);
-		if (truncated) out += "/* truncated: reached maxNodes limit */\n";
-
-		const ok = await this._copyText(out);
-		try { this._withNotice(ok ? "Nested CSS copied" : "Copy failed", ok ? 5000 : 10000); } catch { }
-		if (!ok) console.log(out);
-		return out;
-	}
-
-
-	/**
 	 * Show a timed Notice via a fresh Noticer instance and register it in the plugin set.
 	 */
 	_withNotice(message, timeoutMs) {
 		const n = new Noticer().show(message, timeoutMs);
 		this._noticers.add(n);
 		// when it disposes, remove from set (best-effort via timeout)
-		setTimeout(() => { this._noticers.delete(n); }, (Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs|0) : 3000) + 1000);
+		setTimeout(() => { this._noticers.delete(n); }, (Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs | 0) : 3000) + 1000);
 		return n;
 	}
 };
