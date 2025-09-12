@@ -106,20 +106,98 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		return base + more;
 	}
 
+	/**
+	 * Ensure a singleton <style> for highlighter animations is present.
+	 * Contains a hue-rotate keyframes animation.
+	 */
+	_ensureHighlighterStyle() {
+		if (this._hiStyle && document.head.contains(this._hiStyle)) return;
+		const style = document.createElement("style");
+		style.id = "esc-hi-style";
+		style.textContent = [
+			"@keyframes escHueSpin {",
+			"  from { filter: hue-rotate(0deg); }",
+			"  to   { filter: hue-rotate(360deg); }",
+			"}"
+		].join("\n");
+		document.head.appendChild(style);
+		this._hiStyle = style;
+	}
+
+	/**
+	 * Create (or return) the singleton highlighter div.
+	 * The highlighter is positioned using getBoundingClientRect() and uses
+	 * transitions for motion with ease-in-out.
+	 */
+	_ensureHighlighter() {
+		if (this._hiDiv && document.body.contains(this._hiDiv)) return this._hiDiv;
+		this._ensureHighlighterStyle();
+		const d = document.createElement("div");
+		d.id = "esc-hi";
+		d.setAttribute("aria-hidden", "true");
+		d.style.position = "fixed";
+		d.style.pointerEvents = "none";
+		d.style.zIndex = "999999";
+		d.style.border = "2px dotted rgba(0,0,0,0.7)";
+		d.style.background = "rgba(80,160,255,0.14)";
+		d.style.borderRadius = "4px";
+		d.style.transition = "top 140ms ease-in-out, left 140ms ease-in-out, width 140ms ease-in-out, height 140ms ease-in-out, background-color 140ms ease-in-out";
+		d.style.animation = "escHueSpin 6s linear infinite";
+		d.style.boxSizing = "border-box";
+		d.style.display = "none";
+		document.body.appendChild(d);
+		this._hiDiv = d;
+		return d;
+	}
+
+	/**
+	 * Position and show the highlighter over a given element.
+	 * @param {Element} el
+	 */
+	_placeHighlighter(el) {
+		const d = this._ensureHighlighter();
+		try {
+			const r = el.getBoundingClientRect();
+			d.style.display = "block";
+			d.style.top = Math.max(0, r.top - 2) + "px";
+			d.style.left = Math.max(0, r.left - 2) + "px";
+			d.style.width = Math.max(0, r.width + 4) + "px";
+			d.style.height = Math.max(0, r.height + 4) + "px";
+			this._hiTarget = el;
+		} catch {}
+	}
+
+	/**
+	 * Remove and dispose of the highlighter and style.
+	 * Used when the menu closes.
+	 */
+	_disposeHighlighter() {
+		if (this._hiDiv) {
+			try { this._hiDiv.remove(); } catch {}
+			this._hiDiv = null;
+		}
+		if (this._hiStyle) {
+			try { this._hiStyle.remove(); } catch {}
+			this._hiStyle = null;
+		}
+		this._hiTarget = null;
+	}
+
+
 	// Apply or remove highlight on a DOM element
 	_highlight(el, on) {
+		// Overlay-based highlighter: reuse a singleton DIV instead of mutating target styles.
 		if (!el || el.nodeType !== 1) return;
 		if (on) {
-			if (!Object.prototype.hasOwnProperty.call(el, "__esc_prevBoxShadow")) {
-				el.__esc_prevBoxShadow = el.style.boxShadow || "";
-			}
-			el.style.boxShadow = "inset 0 0 0 2px var(--interactive-accent)";
+			this._placeHighlighter(el);
 		} else {
-			if (Object.prototype.hasOwnProperty.call(el, "__esc_prevBoxShadow")) {
-				el.style.boxShadow = el.__esc_prevBoxShadow;
-				delete el.__esc_prevBoxShadow;
+			// Only hide if turning off the element we currently cover
+			if (this._hiTarget === el) {
+				if (this._hiDiv) this._hiDiv.style.display = "none";
+				this._hiTarget = null;
 			}
 		}
+
 	}
 
 	// Show Menu at mouse position with body at top and target at bottom
@@ -129,7 +207,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 		const menu = new Menu(this.app);
 
-		const clearAll = () => chain.forEach((n) => this._highlight(n, false));
+		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
 
 		for (const el of chain) {
 			const label = this._labelFor(el, 3, true);
@@ -212,7 +290,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (!chain.length) return;
 
 		const menu = new Menu(this.app);
-		const clearAll = () => chain.forEach((n) => this._highlight(n, false));
+		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
 
 		for (const el of chain) {
 			const label = this._labelFor(el, 3, true);

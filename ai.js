@@ -20,9 +20,21 @@ need _openMenuForPath Ctrl+Shift and _openMenuForCss Ctrl, which is
 `;
 
 
-const _1= `
+const newHighlightTask= `
+this file works.
+please preserve comments and jsdoc. you can add to them though.
+for a highligher change to creating a div and appending it to body, then reusing it to indicate the highlighted element. dispose of it when menu is closed.
+position the new highlighter div using getBoundingClientRect of the element to be highlighted.
+make the highlighter motion animated with ease-in-out css transition.
+the hightlight will have a dotted border of 2px and a semi-transparent background color.
+the border color will be a hue-rotation. slowly changing color.
 `;
-const _2= `
+const highlightFixTask= `
+this file works.
+change the style of the hightlight to a dotted border of 2px and a semi-transparent black background
+ color.
+the border color will be a hue-rotation. slowly changing color.
+the highlighted element will have its contrast increased.
 `;
 const _3= `
 `;
