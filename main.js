@@ -261,6 +261,12 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (!chain.length) return;
 
 		const menu = new Menu(this.app);
+		// Title item (non-selectable)
+		menu.addItem((item) => {
+			item.setTitle("Element Snatch CSS — Generate nested CSS tree from ancestor to clicked element");
+			item.setIcon("code");
+			item.setDisabled(true);
+		});
 
 		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
 
@@ -269,6 +275,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			menu.addItem((item) => {
 				item.setTitle(label);
 				item.setIcon("chevrons-right");
+				// Tooltip describing the two selectors that will result
+				const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
+				item.setTooltip ? item.setTooltip(_pathsForTip.descendant + "\n" + _pathsForTip.child) : void 0;
 				item.onClick(async () => {
 					clearAll();
 					await this._css(el, {
@@ -281,6 +290,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 				const dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
 				if (dom) {
+					dom.setAttribute("title", (_pathsForTip.descendant + "\n" + _pathsForTip.child));
 					dom.addEventListener("mouseenter", () => this._highlight(el, true));
 					dom.addEventListener("mouseleave", () => this._highlight(el, false));
 				}
@@ -345,6 +355,12 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (!chain.length) return;
 
 		const menu = new Menu(this.app);
+		// Title item (non-selectable)
+		menu.addItem((item) => {
+			item.setTitle("Element Snatch CSS — Copy selector path from ancestor to clicked element");
+			item.setIcon("route");
+			item.setDisabled(true);
+		});
 		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
 
 		for (const el of chain) {
@@ -352,6 +368,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			menu.addItem((item) => {
 				item.setTitle(label);
 				item.setIcon("chevrons-right");
+				// Tooltip describing the two selectors that will result
+				const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
+				item.setTooltip ? item.setTooltip(_pathsForTip.descendant + "\n" + _pathsForTip.child) : void 0;
 				item.onClick(async () => {
 					clearAll();
 					const paths = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
@@ -363,6 +382,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 				const dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
 				if (dom) {
+					dom.setAttribute("title", (_pathsForTip.descendant + "\n" + _pathsForTip.child));
 					dom.addEventListener("mouseenter", () => this._highlight(el, true));
 					dom.addEventListener("mouseleave", () => this._highlight(el, false));
 				}

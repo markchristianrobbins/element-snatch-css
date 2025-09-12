@@ -47,7 +47,11 @@ the Noticer class has a static method getNoticers() that returns an array of all
 add a title attribute to the menu items for _openMenuForPath that shows the paths that will result for that item.
 add a 'title' menu item that shows the purpose of the menu. this item is not selectable.
 `;
-const _4= `
+const menuTitleTasks= `
+this file works.
+the popup menu for _openMenuForPath and _openMenuForCss needs to have title item at the top that describes the purpose of the menu.
+the title item is not selectable.
+the menu items need a title attribute that shows the paths that will result for that item.
 `;
 const _5= `
 `;
