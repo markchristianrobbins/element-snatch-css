@@ -2,12 +2,7 @@
  * Element Snatch CSS
  * Ctrl + Shift + Middle-click opens a Menu listing ancestors from <body> down to the clicked element.
  * Hovering a menu item highlights its element. Clicking generates nested CSS from that element
- * (including all descendants) and copies it to the clipboard.
- * Ctrl + Middle-click opens a Menu listing ancestors from <body> down to the clicked element.
- * Hovering a menu item highlights its element. Clicking generates a concise CSS path to that element
- * and copies it to the clipboard.
- *
- * https://chatgpt.com/g/g-p-68c3519c39288191ab2af2452df299ae-obs-pi/c/68c3572f-3770-8325-b8f9-a4b1b13210be
+ * (including all descendants) and copies it to the clipboard..
  *
  * No execCommand fallback is used for clipboard.
  */
@@ -524,63 +519,135 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		const selectorFor = (n) => this._selectorFor(n, opts);
 
 		/**
-		 * Render a node and its descendants to text.
-		 * Collapses identical sibling subtrees and annotates the first occurrence with `/** N times *\/`.
-		 *
-		 * @param {Element} node
-		 * @param {number} depth
-		 * @param {string[]} pathSelectors - selectors from root -> this node
-		 * @returns {string}
+		 * Collect direct text nodes, normalize+trim, cut to <= 50 chars, and escape quotes/backslashes.
+		 * Returns an array of strings (possibly empty).
 		 */
-		const render = (node, depth, pathSelectors) => {
+		const textContentsFor = (node) => {
+			const out = [];
+			for (const ch of node.childNodes) {
+				if (ch.nodeType === Node.TEXT_NODE) {
+					let s = ch.nodeValue || "";
+					s = s.replace(/\s+/g, " ").trim();
+					if (!s) continue;
+					if (s.length > 50) s = s.slice(0, 47) + "...";
+					s = s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+					out.push(s);
+				}
+			}
+			return out;
+		};
+
+		/**
+		 * Render a node and descendants to a *canonical* string used for dedupe (structure-only).
+		 * Excludes text-node content lines on purpose.
+		 */
+		const renderCanonical = (node, depth, pathSelectors) => {
 			if (depth > opts.maxDepth) return "";
 			if (++nodeCount > opts.maxNodes) { truncated = true; return ""; }
 
 			const curSel = pathSelectors[pathSelectors.length - 1];
-
 			let block = "";
 			block += opts.indent.repeat(depth) + curSel + " {\n";
 
-			// Emit informative lines (as before)
+			// First two content lines only
 			const descPath = pathSelectors.join(" ");
 			const childPath = pathSelectors.join(" > ");
 			block += opts.indent.repeat(depth + 1) + 'content: "' + descPath + '";\n';
 			block += opts.indent.repeat(depth + 1) + 'content: "' + childPath + '";\n';
 
-			// Collect children subtrees
-			const items = [];
+			// Children (canonical)
+			const childTexts = [];
 			for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
 				if (opts.skipTags && opts.skipTags.has(child.tagName)) continue;
 				const childSel = selectorFor(child);
-				const text = render(child, depth + 1, pathSelectors.concat(childSel));
+				const c = renderCanonical(child, depth + 1, pathSelectors.concat(childSel));
 				if (truncated) break;
-				if (text) items.push(text);
+				if (c) childTexts.push(c);
 			}
 
-			// Regroup identical blocks (order preserved by first occurrence)
-			const counts = new Map();
-			const order = [];
-			for (const t of items) {
-				if (!counts.has(t)) { counts.set(t, 1); order.push(t); }
-				else counts.set(t, counts.get(t) + 1);
-			}
-
-			for (const t of order) {
-				const n = counts.get(t) || 1;
-				if (n > 1) {
-					const annotated = t.replace(/\{\n/, '{ /** ' + n + ' times */\n');
-					block += annotated;
-				} else {
-					block += t;
-				}
-			}
+			// Append children in order
+			for (const t of childTexts) block += t;
 
 			block += opts.indent.repeat(depth) + "}\n";
 			return block;
 		};
 
+		/**
+		 * Render a node and descendants to the *final* string (includes text-node content lines).
+		 * Uses dedupe across siblings based on canonical strings.
+		 */
+		const renderFinal = (node, depth, pathSelectors) => {
+			if (depth > opts.maxDepth) return "";
+			// Note: do not increment nodeCount again here; renderCanonical already accounts during grouping
+			const curSel = pathSelectors[pathSelectors.length - 1];
+
+			let block = "";
+			block += opts.indent.repeat(depth) + curSel + " {\n";
+
+			// First two content lines
+			const descPath = pathSelectors.join(" ");
+			const childPath = pathSelectors.join(" > ");
+			block += opts.indent.repeat(depth + 1) + 'content: "' + descPath + '";\n';
+			block += opts.indent.repeat(depth + 1) + 'content: "' + childPath + '";\n';
+
+			// Text-node content lines
+			const texts = textContentsFor(node);
+			if (texts.length === 0) {
+				block += opts.indent.repeat(depth + 1) + 'content: "";\n';
+			} else {
+				for (const s of texts) {
+					block += opts.indent.repeat(depth + 1) + 'content: "' + s + '";\n';
+				}
+			}
+
+			// Prepare children: compute canonical strings for grouping, and final strings for output
+			const items = [];
+			const canon = [];
+			for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
+				if (opts.skipTags && opts.skipTags.has(child.tagName)) continue;
+				const childSel = selectorFor(child);
+				const cStr = renderCanonical(child, depth + 1, pathSelectors.concat(childSel));
+				if (truncated) break;
+				if (!cStr) continue;
+				canon.push(cStr);
+				items.push({ child, sel: childSel });
+			}
+
+			// Group by canonical string (stable order by first occurrence)
+			const idxByCanon = new Map();
+			const groups = [];
+			for (let i = 0; i < canon.length; i++) {
+				const key = canon[i];
+				if (!idxByCanon.has(key)) {
+					idxByCanon.set(key, groups.length);
+					groups.push({ key, indexList: [i] });
+				} else {
+					groups[idxByCanon.get(key)].indexList.push(i);
+				}
+			}
+
+			// Emit one final block per group; annotate count if > 1
+			for (const g of groups) {
+				const repIndex = g.indexList[0];
+				const count = g.indexList.length;
+				const child = items[repIndex].child;
+				const childSel = items[repIndex].sel;
+				let childFinal = renderFinal(child, depth + 1, pathSelectors.concat(childSel));
+				if (count > 1) {
+					childFinal = childFinal.replace(/\{\n/, '{ /** ' + count + ' times */\n');
+				}
+				block += childFinal;
+			}
+
+			// Close current block
+			block += opts.indent.repeat(depth) + "}\n";
+			return block;
+		};
+
+		// Kick off
 		const rootSel = selectorFor(root);
-		let out = render(root, 0, [rootSel]);
+		let out = renderFinal(root, 0, [rootSel]);
+
 		if (truncated) out += "/* truncated: reached maxNodes limit */\n";
 
 		const ok = await this._copyText(out);
