@@ -263,11 +263,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		const menu = new Menu(this.app);
 		// Title item (non-selectable)
 		menu.addItem((item) => {
-			item.setTitle("Element Snatch CSS — Generate nested CSS tree from ancestor to clicked element");
-			item.setIcon("code");
+			item.setTitle("📸 CSS menu (Ctrl+Middle)");
 			item.setDisabled(true);
 		});
-
 		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
 
 		for (const el of chain) {
@@ -357,8 +355,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		const menu = new Menu(this.app);
 		// Title item (non-selectable)
 		menu.addItem((item) => {
-			item.setTitle("Element Snatch CSS — Copy selector path from ancestor to clicked element");
-			item.setIcon("route");
+			item.setTitle("🛣️ Path menu (Ctrl+Shift+Middle)");
 			item.setDisabled(true);
 		});
 		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
