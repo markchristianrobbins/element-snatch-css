@@ -36,7 +36,15 @@ change the style of the hightlight to a dotted border of 2px and a semi-transpar
 the border color will be a hue-rotation. slowly changing color.
 the highlighted element will have its contrast increased.
 `;
-const _3= `
+const noticesAndMenuTitleTasks= `
+this file works.
+control the life of my Notice calls by creating a Noticer class uses a timeout to dispose of the Notice after a set time.
+the Noticer class has a method show(message:string, timeout?:number) that creates a Notice with the message and disposes of it after the timeout (default 3 seconds).
+the Noticer class has a method dispose() that disposes of the current Notice if it exists.
+the Noticer class has a method isActive() that returns true if there is a current Notice.
+the Noticer class has a static method getNoticers() that returns an array of all Noticer instances.
+add a title attribute to the menu items for _openMenuForPath that shows the paths that will result for that item.
+add a 'title' menu item that shows the purpose of the menu. this item is not selectable.
 `;
 const _4= `
 `;

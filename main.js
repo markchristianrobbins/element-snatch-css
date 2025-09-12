@@ -115,9 +115,14 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		const style = document.createElement("style");
 		style.id = "esc-hi-style";
 		style.textContent = [
-			"@keyframes escHueSpin {",
-			"  from { filter: hue-rotate(0deg); }",
-			"  to   { filter: hue-rotate(360deg); }",
+			"@property --escHue {",
+			"  syntax: '<number>';",
+			"  inherits: false;",
+			"  initial-value: 0;",
+			"}",
+			"@keyframes escHueAnim {",
+			"  from { --escHue: 0; }",
+			"  to   { --escHue: 360; }",
 			"}"
 		].join("\n");
 		document.head.appendChild(style);
@@ -138,11 +143,12 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		d.style.position = "fixed";
 		d.style.pointerEvents = "none";
 		d.style.zIndex = "999999";
-		d.style.border = "2px dotted rgba(0,0,0,0.7)";
-		d.style.background = "rgba(80,160,255,0.14)";
+		d.style.border = "2px dotted";
+		d.style.borderColor = "hsl(" + ("var(--escHue)") + ", 85%, 55%)";
+		d.style.background = "rgba(0,0,0,0.18)";
 		d.style.borderRadius = "4px";
-		d.style.transition = "top 140ms ease-in-out, left 140ms ease-in-out, width 140ms ease-in-out, height 140ms ease-in-out, background-color 140ms ease-in-out";
-		d.style.animation = "escHueSpin 6s linear infinite";
+		d.style.transition = "top 140ms ease-in-out, left 140ms ease-in-out, width 140ms ease-in-out, height 140ms ease-in-out, background-color 140ms ease-in-out, border-color 140ms ease-in-out";
+		d.style.animation = "escHueAnim 8s linear infinite";
 		d.style.boxSizing = "border-box";
 		d.style.display = "none";
 		document.body.appendChild(d);
@@ -186,15 +192,31 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 	// Apply or remove highlight on a DOM element
 	_highlight(el, on) {
-		// Overlay-based highlighter: reuse a singleton DIV instead of mutating target styles.
+		// Overlay-based highlighter + contrast boost on the element itself.
 		if (!el || el.nodeType !== 1) return;
 		if (on) {
+			// place overlay
 			this._placeHighlighter(el);
+			// boost contrast on the element (store previous filter)
+			if (!Object.prototype.hasOwnProperty.call(el, "__esc_prevFilter")) {
+				el.__esc_prevFilter = el.style.filter || "";
+			}
+			try {
+				const cur = el.style.filter || "";
+				if (!/contrast\(/.test(cur)) {
+					el.style.filter = (cur ? cur + " " : "") + "contrast(1.25)";
+				}
+			} catch {}
 		} else {
-			// Only hide if turning off the element we currently cover
+			// Only hide overlay if turning off the element we currently cover
 			if (this._hiTarget === el) {
 				if (this._hiDiv) this._hiDiv.style.display = "none";
 				this._hiTarget = null;
+			}
+			// restore contrast
+			if (Object.prototype.hasOwnProperty.call(el, "__esc_prevFilter")) {
+				el.style.filter = el.__esc_prevFilter;
+				delete el.__esc_prevFilter;
 			}
 		}
 
