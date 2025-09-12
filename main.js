@@ -495,6 +495,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	 *  - child path:      "A > B > C"
 	 * Copies the result to clipboard, shows a Notice, and returns the text.
 	 */
+
 	async _css(root, options) {
 		const opts = Object.assign({
 			useIds: true,
@@ -512,48 +513,69 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			return "";
 		}
 
-		let out = "";
 		let nodeCount = 0;
 		let truncated = false;
 
 		const selectorFor = (n) => this._selectorFor(n, opts);
 
 		/**
+		 * Render a node and its descendants to text.
+		 * Collapses identical sibling subtrees and annotates the first occurrence with `/** N times *\/`.
+		 *
 		 * @param {Element} node
 		 * @param {number} depth
 		 * @param {string[]} pathSelectors - selectors from root -> this node
+		 * @returns {string}
 		 */
-		const walk = (node, depth, pathSelectors) => {
-			if (depth > opts.maxDepth) return;
-			if (++nodeCount > opts.maxNodes) { truncated = true; return; }
+		const render = (node, depth, pathSelectors) => {
+			if (depth > opts.maxDepth) return "";
+			if (++nodeCount > opts.maxNodes) { truncated = true; return ""; }
 
 			const curSel = pathSelectors[pathSelectors.length - 1];
 
-			// Open current block with the short selector (nested style)
-			out += opts.indent.repeat(depth) + curSel + " {\n";
+			let block = "";
+			block += opts.indent.repeat(depth) + curSel + " {\n";
 
-			// Emit content lines for both descendant and child chains
+			// Emit informative lines (as before)
 			const descPath = pathSelectors.join(" ");
 			const childPath = pathSelectors.join(" > ");
-			out += opts.indent.repeat(depth + 1) + 'content: "' + descPath + '";\n';
-			out += opts.indent.repeat(depth + 1) + 'content: "' + childPath + '";\n';
+			block += opts.indent.repeat(depth + 1) + 'content: "' + descPath + '";\n';
+			block += opts.indent.repeat(depth + 1) + 'content: "' + childPath + '";\n';
 
-			// Recurse into element children
+			// Collect children subtrees
+			const items = [];
 			for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
 				if (opts.skipTags && opts.skipTags.has(child.tagName)) continue;
 				const childSel = selectorFor(child);
-				walk(child, depth + 1, pathSelectors.concat(childSel));
+				const text = render(child, depth + 1, pathSelectors.concat(childSel));
 				if (truncated) break;
+				if (text) items.push(text);
 			}
 
-			// Close block
-			out += opts.indent.repeat(depth) + "}\n";
+			// Regroup identical blocks (order preserved by first occurrence)
+			const counts = new Map();
+			const order = [];
+			for (const t of items) {
+				if (!counts.has(t)) { counts.set(t, 1); order.push(t); }
+				else counts.set(t, counts.get(t) + 1);
+			}
+
+			for (const t of order) {
+				const n = counts.get(t) || 1;
+				if (n > 1) {
+					const annotated = t.replace(/\{\n/, '{ /** ' + n + ' times */\n');
+					block += annotated;
+				} else {
+					block += t;
+				}
+			}
+
+			block += opts.indent.repeat(depth) + "}\n";
+			return block;
 		};
 
-		// Kick off from root
 		const rootSel = selectorFor(root);
-		walk(root, 0, [rootSel]);
-
+		let out = render(root, 0, [rootSel]);
 		if (truncated) out += "/* truncated: reached maxNodes limit */\n";
 
 		const ok = await this._copyText(out);
@@ -561,6 +583,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (!ok) console.log(out);
 		return out;
 	}
+
 
 	/**
 	 * Show a timed Notice via a fresh Noticer instance and register it in the plugin set.
