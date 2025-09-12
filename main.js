@@ -607,7 +607,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			block += opts.indent.repeat(depth + 1) + 'content: "' + childPath + '";\n';
 
 			// Text-node content lines
-			const texts = textContentsFor(node);
+			const texts = (overrideTexts && Array.isArray(overrideTexts) && overrideTexts.length)
+				? overrideTexts
+				: textContentsFor(node);
 			if (texts.length === 0) {
 				block += opts.indent.repeat(depth + 1) + 'content: "";\n';
 			} else {
