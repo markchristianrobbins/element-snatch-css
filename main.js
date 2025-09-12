@@ -536,6 +536,22 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			}
 			return out;
 		};
+		/**
+		 * Return the first non-empty trimmed/escaped text node content (<=50 chars) for a node.
+		 */
+		const primaryTextFor = (node) => {
+			for (const ch of node.childNodes) {
+				if (ch.nodeType === Node.TEXT_NODE) {
+					let s = ch.nodeValue || "";
+					s = s.replace(/\s+/g, " ").trim();
+					if (!s) continue;
+					if (s.length > 50) s = s.slice(0, 47) + "...";
+					s = s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+					return s;
+				}
+			}
+			return "";
+		};
 
 		/**
 		 * Render a node and descendants to a *canonical* string used for dedupe (structure-only).
@@ -576,7 +592,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		 * Render a node and descendants to the *final* string (includes text-node content lines).
 		 * Uses dedupe across siblings based on canonical strings.
 		 */
-		const renderFinal = (node, depth, pathSelectors) => {
+		const renderFinal = (node, depth, pathSelectors, overrideTexts) => {
 			if (depth > opts.maxDepth) return "";
 			// Note: do not increment nodeCount again here; renderCanonical already accounts during grouping
 			const curSel = pathSelectors[pathSelectors.length - 1];
@@ -632,10 +648,19 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 				const count = g.indexList.length;
 				const child = items[repIndex].child;
 				const childSel = items[repIndex].sel;
-				let childFinal = renderFinal(child, depth + 1, pathSelectors.concat(childSel));
-				if (count > 1) {
-					childFinal = childFinal.replace(/\{\n/, '{ /** ' + count + ' times */\n');
-				}
+				// Build override texts when collapsing duplicates: one text per occurrence
+                let overrideTexts = null;
+                if (count > 1) {
+                    overrideTexts = g.indexList.map((idx) => {
+                        const nd = items[idx].child;
+                        const t = primaryTextFor(nd);
+                        return t || "";
+                    });
+                }
+                let childFinal = renderFinal(child, depth + 1, pathSelectors.concat(childSel), overrideTexts);
+                if (count > 1) {
+                    childFinal = childFinal.replace(/\{/, "{ /** " + count + " times */");
+                }
 				block += childFinal;
 			}
 
