@@ -16,19 +16,38 @@ const Electron = require("electron");
 /** @typedef {import("obsidian").MenuItem} MenuItem */
 
 
+/**
+ * Lightweight wrapper around Obsidian Notice with auto-disposal.
+ * Tracks all active instances to allow bulk cleanup on unload.
+ */
 class Noticer {
 	constructor() {
 		this._n = null;
 		this._t = null;
 		Noticer._all.add(this);
 	}
-	show(message, timeout) {
+	/**
+	 * Show a Notice for a limited time.
+	 * @param {string} message
+	 * @param {number} [timeout = 0] Milliseconds to show; defaults to 3000.
+	 * @returns {this}
+	 */
+	show(message, timeout = 0) {
 		const ms = Number.isFinite(timeout) ? Math.max(0, timeout | 0) : 3000;
-		this.dispose();
+		// do not dispose the instance here (which would drop it from _all)
+		// instead, hide any existing Notice and clear the timer
+		if (this._t) { try { clearTimeout(this._t); } catch { } this._t = null; }
+		if (this._n && typeof this._n.hide === "function") { try { this._n.hide(); } catch { } }
 		try { this._n = new Notice(String(message || ""), 0); } catch { this._n = null; }
+		// ensure this instance remains tracked globally
+		Noticer._all.add(this);
 		if (ms > 0) this._t = setTimeout(() => { try { this.dispose(); } catch { } }, ms);
 		return this;
 	}
+	/**
+	 * Hide and dispose this Notice instance.
+	 * @returns {this}
+	 */
 	dispose() {
 		if (this._t) { try { clearTimeout(this._t); } catch { }; this._t = null; }
 		if (this._n && typeof this._n.hide === "function") { try { this._n.hide(); } catch { } }
@@ -36,48 +55,64 @@ class Noticer {
 		Noticer._all.delete(this);
 		return this;
 	}
+	/** @returns {boolean} Whether a Notice is currently visible. */
 	isActive() { return !!this._n; }
+	/** @returns {Noticer[]} Snapshot of all active Noticer instances. */
 	static getNoticers() { return Array.from(Noticer._all); }
+	/** Dispose all active Noticer instances. */
 	static disposeAll() { for (const n of Array.from(Noticer._all)) { try { n.dispose(); } catch { } } }
 }
 Noticer._all = new Set();
 
 
+/**
+ * Obsidian plugin that generates nested CSS selectors for a clicked element.
+ * Ctrl/Cmd+Middle opens the CSS menu; Ctrl/Cmd+Shift+Middle opens the path menu.
+ */
 module.exports = class ElementSnatchCssPlugin extends Plugin {
 	/** @type {Set<Noticer>} */
 	_noticers = new Set();
+	/** @type {boolean} */
+	_debug = false;
+	/** Plugin entry point: bind mouse handler and register DOM event. */
 	onload() {
-		/** track multiple notices */
-		//this._noticers = new Set();
+		this._debug = false; // set to true in dev console to enable verbose logging
 		this._onMouseDown = this._onMouseDown.bind(this);
 		this.registerDomEvent(document, "mousedown", this._onMouseDown, { capture: true });
-		console.log("[element-snatch-css] loaded");
+		if (this._debug) console.log("[element-snatch-css] loaded");
 	}
 
+	/** Plugin teardown: dispose notices and highlighter. */
 	onunload() {
-		try { Noticer.disposeAll(); } catch { }
-		console.log("[element-snatch-css] unloaded");
+		try { Noticer.disposeAll(); } catch (e) { if (this._debug) console.error(e); }
+		if (this._debug) console.log("[element-snatch-css] unloaded");
 		this._disposeHighlighter();
 	}
 
 	// Handle Ctrl + Middle click
+	/**
+	 * Handle Ctrl/Cmd + Middle mouse clicks to open menus.
+	 * - Ctrl/Cmd + Middle: CSS menu
+	 * - Ctrl/Cmd + Shift + Middle: Path menu
+	 * @param {MouseEvent} e
+	 */
 	_onMouseDown(e) {
-		console.log("[element-snatch-css] mousedown", e);
+		if (this._debug) console.log("[element-snatch-css] mousedown", e);
 		try {
 			const isMiddle = e.button === 1;
-			const wantMod = e.ctrlKey || e.metaKey;
 			if (isMiddle && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-				console.log("[element-snatch-css] mousedown OK _openMenuForCss", e);
+				if (this._debug) console.log("[element-snatch-css] mousedown OK _openMenuForCss", e);
 				e.preventDefault();
 				e.stopPropagation();
-				const target = (e.target && e.target.closest && e.target.closest("*")) || e.target || document.body;
+				// [ts] Property 'closest' does not exist on type 'EventTarget'.
+				const target = (e.target instanceof Element ? (e.target.closest("*") || e.target) : document.body);
 				this._openMenuForCss(target, e, target);
 			}
 			if (isMiddle && (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
-				console.log("[element-snatch-css] mousedown OK _openMenuForPath", e);
+				if (this._debug) console.log("[element-snatch-css] mousedown OK _openMenuForPath", e);
 				e.preventDefault();
 				e.stopPropagation();
-				const target = (e.target && e.target.closest && e.target.closest("*")) || e.target || document.body;
+				const target = (e.target instanceof Element ? (e.target.closest("*") || e.target) : document.body);
 				this._openMenuForPath(target, e, target);
 			}
 
@@ -87,6 +122,12 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 
 	// Build ancestry array body -> ... -> node
+	/**
+	 * Build ancestors from stopAt (inclusive) down to node (inclusive).
+	 * @param {Element} node
+	 * @param {Element} [stopAt=document.body]
+	 * @returns {Element[]}
+	 */
 	_buildAncestry(node, stopAt = document.body) {
 		const chain = [];
 		let cur = node;
@@ -100,40 +141,14 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		return chain;
 	}
 
-	// Build descendant and child selector paths from ancestor -> target
-	_buildPathsBetween_(ancestor, target, options) {
-		const opts = Object.assign({
-			useIds: true,
-			useClasses: true,
-			includeTagIfNoClasses: true,
-			includeNthChild: false
-		}, options || {});
-
-		if (!ancestor || !target) return { descendant: "", child: "" };
-		// Ascend from target to ancestor, collecting elements
-		const chain = [];
-		let cur = target;
-		let guard = 0;
-		while (cur && cur.nodeType === 1 && guard++ < 2000) {
-			chain.push(cur);
-			if (cur === ancestor) break;
-			cur = cur.parentElement;
-		}
-		if (chain[chain.length - 1] !== ancestor) {
-			// ancestor is not actually an ancestor of target; fall back to ancestry from body
-			const bodyChain = this._buildAncestry(target, document.body);
-			const idx = bodyChain.indexOf(ancestor);
-			if (idx >= 0) chain.splice(idx + 1); // trim
-		}
-		chain.reverse(); // ancestor -> ... -> target
-		const sels = chain.map((n) => this._selectorFor(n, opts));
-		return {
-			descendant: sels.join(" "),
-			child: sels.join(" > ")
-		};
-	}
-
 	// Human-readable label: tag#id.class1.class2 [+N]
+	/**
+	 * Build a compact human-readable label for a node (e.g., tag#id.cls1.cls2 [+N]).
+	 * @param {Element} node
+	 * @param {number} [maxClasses=3]
+	 * @param {boolean} [includeTag=true]
+	 * @returns {string}
+	 */
 	_labelFor(node, maxClasses = 3, includeTag = true) {
 		const tag = includeTag ? node.tagName.toLowerCase() : "";
 		const id = node.id ? "#" + node.id : "";
@@ -151,6 +166,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	 * Contains a hue-rotate keyframes animation.
 	 */
 	_ensureHighlighterStyle() {
+		// Prefer reusing an existing style element by id to avoid duplicates across reloads
+		const existing = document.getElementById("esc-hi-style");
+		if (existing) { this._hiStyle = existing; return; }
 		if (this._hiStyle && document.head.contains(this._hiStyle)) return;
 		const style = document.createElement("style");
 		style.id = "esc-hi-style";
@@ -210,7 +228,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			d.style.width = Math.max(0, r.width + 4) + "px";
 			d.style.height = Math.max(0, r.height + 4) + "px";
 			this._hiTarget = el;
-		} catch { }
+		} catch (e) { if (this._debug) console.error(e); }
 	}
 
 	/**
@@ -219,11 +237,11 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	 */
 	_disposeHighlighter() {
 		if (this._hiDiv) {
-			try { this._hiDiv.remove(); } catch { }
+			try { this._hiDiv.remove(); } catch (e) { if (this._debug) console.error(e); }
 			this._hiDiv = null;
 		}
 		if (this._hiStyle) {
-			try { this._hiStyle.remove(); } catch { }
+			try { this._hiStyle.remove(); } catch (e) { if (this._debug) console.error(e); }
 			this._hiStyle = null;
 		}
 		this._hiTarget = null;
@@ -231,6 +249,11 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 
 	// Apply or remove highlight on a DOM element
+	/**
+	 * Toggle the overlay highlighter and optional contrast bump on a target element.
+	 * @param {Element} el
+	 * @param {boolean} on
+	 */
 	_highlight(el, on) {
 		// Overlay-based highlighter: reuse a singleton DIV instead of mutating target styles.
 		if (!el || el.nodeType !== 1) return;
@@ -245,7 +268,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 				if (!/contrast\(/.test(cur)) {
 					el.style.filter = (cur ? cur + " " : "") + "contrast(1.25)";
 				}
-			} catch { }
+			} catch (e) { if (this._debug) console.error(e); }
 		} else {
 			// Only hide overlay if turning off the element we currently cover
 			if (this._hiTarget === el) {
@@ -262,6 +285,12 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 
 	// Show Menu at mouse position with body at top and target at bottom
+	/**
+	 * Show ancestor menu that copies nested CSS for the chosen ancestor subtree.
+	 * @param {Element} targetEl
+	 * @param {MouseEvent} mouseEvt
+	 * @param {Element} originalTargetEl
+	 */
 	_openMenuForCss(targetEl, mouseEvt, originalTargetEl) {
 		const chain = this._buildAncestry(targetEl, document.body);
 		if (!chain.length) return;
@@ -273,11 +302,6 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			try {
 				item.setTitle("📸 CSS menu (Ctrl+Middle)");
 				item.setIcon("code");
-				//console.log("Menu Item:", item);
-				//item.onClick(() => { }); // no-op
-				//const _dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
-				// @ts-ignore
-				// if (item?.dom) { item.dom.classList.add('esc-menu-title'); item.dom.setAttribute('aria-disabled', 'true'); }
 			} catch (err) {
 				console.error("[element-snatch-css] addItem failed", err);
 			}
@@ -297,9 +321,8 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 					try {
 						const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
 						tip = _pathsForTip.child.replace(/\s+/g, ' ').replace(/>/g, '\n>').trim();
-						//item.setTooltip?.(tip);
 					} catch (e) {
-						console.warn("[element-snatch-css] tooltip build failed", e);
+						if (this._debug) console.warn("[element-snatch-css] tooltip build failed", e);
 					}
 
 					item.onClick(async () => {
@@ -316,7 +339,6 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 					const dom = item.dom; // || item.domEl || item._dom || item.buttonEl || item.containerEl;
 					if (dom) {
 						if (tip) dom.setAttribute("title", tip);
-						//dom.classList.add("esc-force-show");
 						dom.addEventListener("mouseenter", () => this._highlight(el, true));
 						dom.addEventListener("mouseleave", () => this._highlight(el, false));
 					}
@@ -342,7 +364,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			if (!menuEl) return;
 			const obs = new MutationObserver(() => {
 				if (!document.body.contains(menuEl)) {
-					try { obs.disconnect(); } catch { }
+					try { obs.disconnect(); } catch (e) { if (this._debug) console.error(e); }
 					clearAll();
 				}
 			});
@@ -351,8 +373,15 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 
 	// Build two selector strings between ancestorEl (inclusive) and targetEl (inclusive).
+	/**
+	 * Build descendant and child selector strings between ancestorEl and targetEl.
+	 * @param {Element} ancestorEl
+	 * @param {Element} targetEl
+	 * @param {{includeNthChild?: boolean}} [options]
+	 * @returns {{descendant: string, child: string}}
+	 */
 	_buildPathsBetween(ancestorEl, targetEl, options) {
-		console.log("[element-snatch-css] _buildPathsBetween2", ancestorEl, targetEl, options);
+		if (this._debug) console.log("[element-snatch-css] _buildPathsBetween2", ancestorEl, targetEl, options);
 		const opts = Object.assign({ includeNthChild: false }, options || {});
 		if (!ancestorEl || !targetEl) return { descendant: "", child: "" };
 		// Walk up from target to ancestor
@@ -365,8 +394,19 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			cur = cur.parentElement;
 		}
 		if (chain[chain.length - 1] !== ancestorEl) {
-			// ancestorEl is not actually an ancestor; fallback to just target
-			chain.push(ancestorEl);
+			// ancestorEl is not actually an ancestor; rebuild using ancestry from <body>
+			const bodyChain = this._buildAncestry(targetEl, document.body); // body -> ... -> target
+			const idx = bodyChain.indexOf(ancestorEl);
+			if (idx >= 0) {
+				// use slice from ancestor to target; keep local order consistent before final reverse
+				const slice = bodyChain.slice(idx); // ancestor -> ... -> target
+				chain.length = 0;
+				for (let i = slice.length - 1; i >= 0; i--) chain.push(slice[i]); // target -> ... -> ancestor
+			} else {
+				// fallback to just target
+				chain.length = 0;
+				chain.push(targetEl);
+			}
 		}
 		chain.reverse(); // ancestor -> ... -> target
 		const sels = chain.map((n) => this._selectorFor(n, {
@@ -382,6 +422,12 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 
 	// Show ancestor menu for PATH copying (between chosen ancestor and originalTargetEl)
+	/**
+	 * Show ancestor menu that copies selector paths (descendant and child forms).
+	 * @param {Element} targetEl
+	 * @param {MouseEvent} mouseEvt
+	 * @param {Element} originalTargetEl
+	 */
 	_openMenuForPath(targetEl, mouseEvt, originalTargetEl) {
 		const chain = this._buildAncestry(targetEl, document.body);
 		if (!chain.length) return;
@@ -402,23 +448,19 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			menu.addItem((item) => {
 				item.setTitle(label);
 				item.setIcon("chevrons-right");
-				// Tooltip describing the two selectors that will result
-				//const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
-				//item.setTooltip ? item.setTooltip(_pathsForTip.descendant + "\n" + _pathsForTip.child) : void 0;
 				item.onClick(async () => {
 					clearAll();
 					const paths = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
 					const text = paths.descendant + '\n' + paths.child + '\n';
 					const ok = await this._copyText(text);
-					try { this._withNotice(ok ? "Path copied" : "Copy failed", ok ? 5000 : 10000); } catch { }
-					if (!ok) console.log(text);
+					try { this._withNotice(ok ? "Path copied" : "Copy failed", ok ? 5000 : 10000); } catch (e) { if (this._debug) console.error(e); }
+					if (!ok && this._debug) console.log(text);
 				});
 
 				// @ts-ignore
 				const dom = item?.dom; // || item.domEl || item._dom || item.buttonEl || item.containerEl;
 				if (dom) {
 					const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
-					// dom.classList.add("esc-force-show");
 					const desc = _pathsForTip.descendant.replace(/\s+/g, ' ').replace(/ /g, ' \n').trim();
 					const child = _pathsForTip.child.replace(/\s+/g, ' ').replace(/ >/g, ' \n>').trim();
 					dom.setAttribute("title", ("== CSS SELECTORS ==\n\nDescendant form:\n" + desc + "\n\n" + "Child form:\n" + child));
@@ -442,7 +484,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			if (!menuEl) return;
 			const obs = new MutationObserver(() => {
 				if (!document.body.contains(menuEl)) {
-					try { obs.disconnect(); } catch { }
+					try { obs.disconnect(); } catch (e) { if (this._debug) console.error(e); }
 					clearAll();
 				}
 			});
@@ -451,6 +493,11 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 
 	// Copy helper: Electron first, then modern Web Clipboard API
+	/**
+	 * Copy text to the clipboard using Electron when available, falling back to the Web Clipboard API.
+	 * @param {string} s
+	 * @returns {Promise<boolean>} Whether the copy succeeded.
+	 */
 	async _copyText(s) {
 		const text = String(s == null ? "" : s);
 		try {
@@ -459,17 +506,22 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 				clipboard.writeText(text);
 				return true;
 			}
-		} catch { }
+		} catch (e) { if (this._debug) console.error(e); }
 		try {
 			if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
 				await navigator.clipboard.writeText(text);
 				return true;
 			}
-		} catch { }
+		} catch (e) { if (this._debug) console.error(e); }
 		return false;
 	}
 
 	// CSS.escape with basic fallback
+	/**
+	 * Escape an arbitrary string for safe use in a CSS selector.
+	 * @param {string} str
+	 * @returns {string}
+	 */
 	_cssEscape(str) {
 		if (window.CSS && typeof window.CSS.escape === "function") return CSS.escape(str);
 		return String(str).replace(/[^a-zA-Z0-9_-]/g, function (c) {
@@ -478,6 +530,12 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 
 	// Choose a selector for a node
+	/**
+	 * Build a selector for a node using id, classes, tag, and optional :nth-child.
+	 * @param {Element} node
+	 * @param {{useIds?: boolean, useClasses?: boolean, includeTagIfNoClasses?: boolean, includeNthChild?: boolean}} opts
+	 * @returns {string}
+	 */
 	_selectorFor(node, opts) {
 		if (opts.useIds && node.id) return "#" + this._cssEscape(node.id);
 
@@ -574,7 +632,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 			const curSel = pathSelectors[pathSelectors.length - 1];
 			let block = "";
-			block += opts.indent.repeat(depth) + curSel + " {\n";
+			block += opts.indent.repeat(depth) + curSel + "{\n";
 
 			// First two content lines only
 			const descPath = pathSelectors.join(" ");
@@ -662,15 +720,15 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 				const child = items[repIndex].child;
 				const childSel = items[repIndex].sel;
 				// Build override texts when collapsing duplicates: one text per occurrence
-				let overrideTexts = null;
+				let childOverrideTexts = null;
 				if (count > 1) {
-					overrideTexts = g.indexList.map((idx) => {
+					childOverrideTexts = g.indexList.map((idx) => {
 						const nd = items[idx].child;
 						const t = primaryTextFor(nd);
 						return t || "";
 					});
 				}
-				let childFinal = renderFinal(child, depth + 1, pathSelectors.concat(childSel), overrideTexts);
+				let childFinal = renderFinal(child, depth + 1, pathSelectors.concat(childSel), childOverrideTexts);
 				if (count > 1) {
 					childFinal = childFinal.replace(/\{/, "{ /** " + count + " times */");
 				}
@@ -689,8 +747,8 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (truncated) out += "/* truncated: reached maxNodes limit */\n";
 
 		const ok = await this._copyText(out);
-		try { this._withNotice(ok ? "Nested CSS copied" : "Copy failed", ok ? 5000 : 10000); } catch { }
-		if (!ok) console.log(out);
+		try { this._withNotice(ok ? "Nested CSS copied" : "Copy failed", ok ? 5000 : 10000); } catch (e) { if (this._debug) console.error(e); }
+		if (!ok && this._debug) console.log(out);
 		return out;
 	}
 
