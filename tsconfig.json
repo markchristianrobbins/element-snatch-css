@@ -3,19 +3,20 @@
 		"checkJs": true,
 		"allowJs": true,
 		"strict": true,
-		"noImplicitAny": false,  // <-- allow implicit any
+		"noImplicitAny": true,
 		"target": "ES2020",
 		"types": [
 			"obsidian",
-			"electron",
 			"node"
 		],
 		"module": "commonjs",
 		"lib": [
 			"ES2020",
-			"DOM"
+			"DOM",
+			"dom.iterable"
 		]
 	},
+	"typeAcquisition": { "enable": true, "include": ["electron"] },
 	"include": [
 		"**/*.js",
 		"**/*.d.ts"

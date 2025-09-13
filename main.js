@@ -87,7 +87,7 @@ class Noticer {
 		}
 	}
 }
-	// #endregion __Noticer_static
+// #endregion __Noticer_static
 Noticer._all = new Set();
 // #endregion __Noticer
 
@@ -489,7 +489,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	 * ### Callers
 	 * - {@link _openMenuForCss}
 	 * @private
-	 * @param {Element} root Root element to start from (inclusive).
+	 * @param {HTMLElement} root Root element to start from (inclusive).
 	 * @param {{
 	 *   useIds?: boolean,
 	 *   useClasses?: boolean,
@@ -522,14 +522,17 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		let nodeCount = 0;
 		let truncated = false;
 
+		/** @type {(n: HTMLElement) => string} */
 		const selectorFor = (n) => this._selectorFor(n, opts);
 
 		/**
 		 * Collect direct text nodes, normalize+trim, cut to <= 50 chars, and escape quotes/backslashes.
 		 * Returns an array of strings (possibly empty).
+		 * @type {(node: HTMLElement) => string[]}
 		 */
 		const textContentsFor = (node) => {
 			const out = [];
+			// [ts] Type 'NodeListOf<ChildNode>' must have a '[Symbol.iterator]()' method that returns an iterator.
 			for (const ch of node.childNodes) {
 				if (ch.nodeType === Node.TEXT_NODE) {
 					let s = ch.nodeValue || "";
@@ -544,6 +547,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		};
 		/**
 		 * Return the first non-empty trimmed/escaped text node content (<=50 chars) for a node.
+		 * @type {(node: HTMLElement) => string}
 		 */
 		const primaryTextFor = (node) => {
 			for (const ch of node.childNodes) {
@@ -562,8 +566,10 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		/**
 		 * Render a node and descendants to a *canonical* string used for dedupe (structure-only).
 		 * Excludes text-node content lines on purpose.
+		 * @type {(node: HTMLElement, depth:number, pathSelector: string[]) => string}
 		 */
 		const renderCanonical = (node, depth, pathSelectors) => {
+			if (!node) return "";
 			if (depth > opts.maxDepth) return "";
 			if (++nodeCount > opts.maxNodes) { truncated = true; return ""; }
 
@@ -578,10 +584,15 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			block += opts.indent.repeat(depth + 1) + 'content: "' + childPath + '";\n';
 
 			// Children (canonical)
+			/** @type {string[]} */
 			const childTexts = [];
-			for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
+
+			/** @type {HTMLElement | null} */
+			let child = /** @type {HTMLElement | null} */ (node.firstElementChild);
+
+			for (; child; child = /** @type {HTMLElement | null} */ (child.nextElementSibling)) {
 				if (opts.skipTags && opts.skipTags.has(child.tagName)) continue;
-				const childSel = selectorFor(child);
+				const childSel = selectorFor(child); // child is HTMLElement in this block
 				const c = renderCanonical(child, depth + 1, pathSelectors.concat(childSel));
 				if (truncated) break;
 				if (c) childTexts.push(c);
@@ -595,9 +606,10 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		};
 
 		/**
-		 * Render a node and descendants to the *final* string (includes text-node content lines).
-		 * Uses dedupe across siblings based on canonical strings.
-		 */
+		  * Render a node and descendants to the *final* string (includes text-node content lines).
+		  * Uses dedupe across siblings based on canonical strings.
+		  * @type {(node: HTMLElement, depth: number, pathSelectors: string[], overrideTexts?: string[]) => string}
+		  */
 		const renderFinal = (node, depth, pathSelectors, overrideTexts) => {
 			if (depth > opts.maxDepth) return "";
 			// Note: do not increment nodeCount again here; renderCanonical already accounts during grouping
@@ -625,28 +637,45 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			}
 
 			// Prepare children: compute canonical strings for grouping, and final strings for output
+
+			/** @type {{ child: HTMLElement, sel: string }[]} */
 			const items = [];
+			/** @type {string[]} */
 			const canon = [];
-			for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
+
+			/** @type {HTMLElement | null} */
+			let child = /** @type {HTMLElement | null} */ (node.firstElementChild);
+
+			for (; child; child = /** @type {HTMLElement | null} */ (child.nextElementSibling)) {
 				if (opts.skipTags && opts.skipTags.has(child.tagName)) continue;
-				const childSel = selectorFor(child);
-				const cStr = renderCanonical(child, depth + 1, pathSelectors.concat(childSel));
+
+				/** @type {HTMLElement} */
+				const h = child; // narrowed for use below
+
+				const childSel = selectorFor(h);
+				const cStr = renderCanonical(h, depth + 1, pathSelectors.concat(childSel));
 				if (truncated) break;
 				if (!cStr) continue;
+
 				canon.push(cStr);
-				items.push({ child, sel: childSel });
+				items.push({ child: h, sel: childSel });
 			}
 
 			// Group by canonical string (stable order by first occurrence)
+			/** @type {Map<string, number>} */
 			const idxByCanon = new Map();
+			/** @type {{ key: string, indexList: number[] }[]} */
 			const groups = [];
+
 			for (let i = 0; i < canon.length; i++) {
 				const key = canon[i];
-				if (!idxByCanon.has(key)) {
+				const existing = idxByCanon.get(key); // number | undefined
+
+				if (existing === undefined) {
 					idxByCanon.set(key, groups.length);
 					groups.push({ key, indexList: [i] });
 				} else {
-					groups[idxByCanon.get(key)].indexList.push(i);
+					groups[existing].indexList.push(i);
 				}
 			}
 
@@ -656,8 +685,10 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 				const count = g.indexList.length;
 				const child = items[repIndex].child;
 				const childSel = items[repIndex].sel;
+
 				// Build override texts when collapsing duplicates: one text per occurrence
-				let childOverrideTexts = null;
+				/** @type {string[] | undefined} */
+				let childOverrideTexts = undefined;
 				if (count > 1) {
 					childOverrideTexts = g.indexList.map((idx) => {
 						const nd = items[idx].child;
@@ -665,12 +696,38 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 						return t || "";
 					});
 				}
+
 				let childFinal = renderFinal(child, depth + 1, pathSelectors.concat(childSel), childOverrideTexts);
 				if (count > 1) {
 					childFinal = childFinal.replace(/\{/, "{ /** " + count + " times */");
 				}
 				block += childFinal;
 			}
+
+
+			// // Emit one final block per group; annotate count if > 1
+			// for (const g of groups) {
+			// 	const repIndex = g.indexList[0];
+			// 	const count = g.indexList.length;
+			// 	const child = items[repIndex].child;
+			// 	const childSel = items[repIndex].sel;
+			// 	// Build override texts when collapsing duplicates: one text per occurrence
+			// 	let childOverrideTexts = null;
+			// 	if (count > 1) {
+			// 		childOverrideTexts = g.indexList.map((idx) => {
+			// 			const nd = items[idx].child;
+			// 			const t = primaryTextFor(nd);
+			// 			return t || "";
+			// 		});
+			// 	}
+			// 	// [ts] Argument of type 'string[] | null' is not assignable to parameter of type 'string[] | undefined'.
+			// 	// Type 'null' is not assignable to type 'string[] | undefined'.
+			// 	let childFinal = renderFinal(child, depth + 1, pathSelectors.concat(childSel), childOverrideTexts);
+			// 	if (count > 1) {
+			// 		childFinal = childFinal.replace(/\{/, "{ /** " + count + " times */");
+			// 	}
+			// 	block += childFinal;
+			// }
 
 			// Close current block
 			block += opts.indent.repeat(depth) + "}\n";
@@ -854,7 +911,6 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		}, 0);
 	}
 	// #endregion __Plugin_menus
-
 
 };
 // #endregion __Plugin
