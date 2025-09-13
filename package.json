@@ -1,11 +1,14 @@
 {
 	"name": "element-snatch-css",
 	"version": "1.0.0",
-	"description": "An [Obsidian](https://obsidian.md) plugin to copy CSS selectors for any element on the page. Two modes basically.",
+	"description": "An Obsidian plugin to copy CSS selectors for any element on the page. Two modes basically.",
 	"main": "main.js",
 	"scripts": {
 		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"author": "Mark Christian Robbins",
-	"license": "MIT"
+	"license": "MIT",
+	"devDependencies": {
+		"obsidian": "^1.8.7"
+	}
 }

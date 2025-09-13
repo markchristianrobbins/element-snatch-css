@@ -7,12 +7,15 @@
  * No execCommand fallback is used for clipboard.
  */
 
-const { Plugin, Menu, Notice } = require("obsidian");
+// @ts-check
+const Obsidian = require("obsidian");
+const { Plugin, Menu, Notice } = Obsidian;
+// @ts-ignore
+const Electron = require("electron");
 
-/**
- * Noticer: controls the lifetime of Obsidian Notice with precise timing.
- * Supports many instances concurrently.
- */
+/** @typedef {import("obsidian").MenuItem} MenuItem */
+
+
 class Noticer {
 	constructor() {
 		this._n = null;
@@ -41,9 +44,11 @@ Noticer._all = new Set();
 
 
 module.exports = class ElementSnatchCssPlugin extends Plugin {
+	/** @type {Set<Noticer>} */
+	_noticers = new Set();
 	onload() {
 		/** track multiple notices */
-		this._noticers = new Set();
+		//this._noticers = new Set();
 		this._onMouseDown = this._onMouseDown.bind(this);
 		this.registerDomEvent(document, "mousedown", this._onMouseDown, { capture: true });
 		console.log("[element-snatch-css] loaded");
@@ -96,7 +101,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 
 	// Build descendant and child selector paths from ancestor -> target
-	_buildPathsBetween(ancestor, target, options) {
+	_buildPathsBetween_(ancestor, target, options) {
 		const opts = Object.assign({
 			useIds: true,
 			useClasses: true,
@@ -261,15 +266,18 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		const chain = this._buildAncestry(targetEl, document.body);
 		if (!chain.length) return;
 
-		const menu = new Menu(this.app);
+		const menu = new Menu();
 		// Title label (enabled no-op so themes can't hide it)
+		/** @param {import("obsidian").MenuItem} item */
 		menu.addItem((item) => {
 			try {
 				item.setTitle("📸 CSS menu (Ctrl+Middle)");
 				item.setIcon("code");
+				//console.log("Menu Item:", item);
 				//item.onClick(() => { }); // no-op
-				const _dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
-				if (_dom) { _dom.classList.add('esc-menu-title'); _dom.setAttribute('aria-disabled', 'true'); }
+				//const _dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
+				// @ts-ignore
+				// if (item?.dom) { item.dom.classList.add('esc-menu-title'); item.dom.setAttribute('aria-disabled', 'true'); }
 			} catch (err) {
 				console.error("[element-snatch-css] addItem failed", err);
 			}
@@ -289,7 +297,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 					try {
 						const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
 						tip = _pathsForTip.child.replace(/\s+/g, ' ').replace(/>/g, '\n>').trim();
-						item.setTooltip?.(tip);
+						//item.setTooltip?.(tip);
 					} catch (e) {
 						console.warn("[element-snatch-css] tooltip build failed", e);
 					}
@@ -304,10 +312,11 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 						});
 					});
 
-					const dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
+					// @ts-ignore
+					const dom = item.dom; // || item.domEl || item._dom || item.buttonEl || item.containerEl;
 					if (dom) {
 						if (tip) dom.setAttribute("title", tip);
-						dom.classList.add("esc-force-show");
+						//dom.classList.add("esc-force-show");
 						dom.addEventListener("mouseenter", () => this._highlight(el, true));
 						dom.addEventListener("mouseleave", () => this._highlight(el, false));
 					}
@@ -343,6 +352,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 	// Build two selector strings between ancestorEl (inclusive) and targetEl (inclusive).
 	_buildPathsBetween(ancestorEl, targetEl, options) {
+		console.log("[element-snatch-css] _buildPathsBetween2", ancestorEl, targetEl, options);
 		const opts = Object.assign({ includeNthChild: false }, options || {});
 		if (!ancestorEl || !targetEl) return { descendant: "", child: "" };
 		// Walk up from target to ancestor
@@ -376,15 +386,14 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		const chain = this._buildAncestry(targetEl, document.body);
 		if (!chain.length) return;
 
-		const menu = new Menu(this.app);
+		const menu = new Menu();
 		// Title label (enabled no-op so themes don't hide disabled items)
 		menu.addItem((item) => {
 			item.setTitle("🛣️ Path menu (Ctrl+Shift+Middle)");
-			//item.onClick(() => { });
-			item.setIcon("path");
-			item.setDisabled(true);
-			const _dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
-			if (_dom) { _dom.classList.add('esc-menu-title'); _dom.setAttribute('aria-disabled','true'); }
+			//item.setIcon("path");
+			//item.setDisabled(true);
+			// const _dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
+			// if (_dom) { _dom.classList.add('esc-menu-title'); _dom.setAttribute('aria-disabled','true'); }
 		});
 		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
 
@@ -394,8 +403,8 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 				item.setTitle(label);
 				item.setIcon("chevrons-right");
 				// Tooltip describing the two selectors that will result
-				const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
-				item.setTooltip ? item.setTooltip(_pathsForTip.descendant + "\n" + _pathsForTip.child) : void 0;
+				//const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
+				//item.setTooltip ? item.setTooltip(_pathsForTip.descendant + "\n" + _pathsForTip.child) : void 0;
 				item.onClick(async () => {
 					clearAll();
 					const paths = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
@@ -405,9 +414,11 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 					if (!ok) console.log(text);
 				});
 
-				const dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
+				// @ts-ignore
+				const dom = item?.dom; // || item.domEl || item._dom || item.buttonEl || item.containerEl;
 				if (dom) {
-					dom.classList.add("esc-force-show");
+					const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
+					// dom.classList.add("esc-force-show");
 					const desc = _pathsForTip.descendant.replace(/\s+/g, ' ').replace(/ /g, ' \n').trim();
 					const child = _pathsForTip.child.replace(/\s+/g, ' ').replace(/ >/g, ' \n>').trim();
 					dom.setAttribute("title", ("== CSS SELECTORS ==\n\nDescendant form:\n" + desc + "\n\n" + "Child form:\n" + child));
@@ -443,7 +454,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	async _copyText(s) {
 		const text = String(s == null ? "" : s);
 		try {
-			const { clipboard } = require("electron");
+			const { clipboard } = Electron;
 			if (clipboard && typeof clipboard.writeText === "function") {
 				clipboard.writeText(text);
 				return true;
@@ -651,18 +662,18 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 				const child = items[repIndex].child;
 				const childSel = items[repIndex].sel;
 				// Build override texts when collapsing duplicates: one text per occurrence
-                let overrideTexts = null;
-                if (count > 1) {
-                    overrideTexts = g.indexList.map((idx) => {
-                        const nd = items[idx].child;
-                        const t = primaryTextFor(nd);
-                        return t || "";
-                    });
-                }
-                let childFinal = renderFinal(child, depth + 1, pathSelectors.concat(childSel), overrideTexts);
-                if (count > 1) {
-                    childFinal = childFinal.replace(/\{/, "{ /** " + count + " times */");
-                }
+				let overrideTexts = null;
+				if (count > 1) {
+					overrideTexts = g.indexList.map((idx) => {
+						const nd = items[idx].child;
+						const t = primaryTextFor(nd);
+						return t || "";
+					});
+				}
+				let childFinal = renderFinal(child, depth + 1, pathSelectors.concat(childSel), overrideTexts);
+				if (count > 1) {
+					childFinal = childFinal.replace(/\{/, "{ /** " + count + " times */");
+				}
 				block += childFinal;
 			}
 
