@@ -104,15 +104,16 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 				if (this._debug) console.log("[element-snatch-css] mousedown OK _openMenuForCss", e);
 				e.preventDefault();
 				e.stopPropagation();
-				// [ts] Property 'closest' does not exist on type 'EventTarget'.
-				const target = (e.target instanceof Element ? (e.target.closest("*") || e.target) : document.body);
+				/** @type {HTMLElement} */
+				const target = (e.target instanceof HTMLElement ? (e.target.closest("*") || e.target) : document.body);
 				this._openMenuForCss(target, e, target);
 			}
 			if (isMiddle && (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
 				if (this._debug) console.log("[element-snatch-css] mousedown OK _openMenuForPath", e);
 				e.preventDefault();
 				e.stopPropagation();
-				const target = (e.target instanceof Element ? (e.target.closest("*") || e.target) : document.body);
+				/** @type {HTMLElement} */
+				const target = (e.target instanceof HTMLElement ? (e.target.closest("*") || e.target) : document.body);
 				this._openMenuForPath(target, e, target);
 			}
 
@@ -124,9 +125,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	// Build ancestry array body -> ... -> node
 	/**
 	 * Build ancestors from stopAt (inclusive) down to node (inclusive).
-	 * @param {Element} node
-	 * @param {Element} [stopAt=document.body]
-	 * @returns {Element[]}
+	 * @param {HTMLElement} node
+	 * @param {HTMLElement} [stopAt=document.body]
+	 * @returns {HTMLElement[]}
 	 */
 	_buildAncestry(node, stopAt = document.body) {
 		const chain = [];
@@ -251,7 +252,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	// Apply or remove highlight on a DOM element
 	/**
 	 * Toggle the overlay highlighter and optional contrast bump on a target element.
-	 * @param {Element} el
+	 * @param {HTMLElement} el
 	 * @param {boolean} on
 	 */
 	_highlight(el, on) {
@@ -261,6 +262,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			this._placeHighlighter(el);
 			// boost contrast on the element (store previous filter)
 			if (!Object.prototype.hasOwnProperty.call(el, "__esc_prevFilter")) {
+				// @ts-ignore
 				el.__esc_prevFilter = el.style.filter || "";
 			}
 			try {
@@ -277,7 +279,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			}
 			// restore contrast
 			if (Object.prototype.hasOwnProperty.call(el, "__esc_prevFilter")) {
+				// @ts-ignore
 				el.style.filter = el.__esc_prevFilter;
+				// @ts-ignore
 				delete el.__esc_prevFilter;
 			}
 		}
@@ -287,9 +291,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	// Show Menu at mouse position with body at top and target at bottom
 	/**
 	 * Show ancestor menu that copies nested CSS for the chosen ancestor subtree.
-	 * @param {Element} targetEl
+	 * @param {HTMLElement} targetEl
 	 * @param {MouseEvent} mouseEvt
-	 * @param {Element} originalTargetEl
+	 * @param {HTMLElement} originalTargetEl
 	 */
 	_openMenuForCss(targetEl, mouseEvt, originalTargetEl) {
 		const chain = this._buildAncestry(targetEl, document.body);
@@ -306,7 +310,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 				console.error("[element-snatch-css] addItem failed", err);
 			}
 		});
-		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
+		const clearAll = () => { chain.forEach((/** HTMLElement */n) => this._highlight(/** HTMLElement */n, false)); this._disposeHighlighter(); };
 
 		// Ancestors
 		for (const el of chain) {
@@ -375,8 +379,8 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	// Build two selector strings between ancestorEl (inclusive) and targetEl (inclusive).
 	/**
 	 * Build descendant and child selector strings between ancestorEl and targetEl.
-	 * @param {Element} ancestorEl
-	 * @param {Element} targetEl
+	 * @param {HTMLElement} ancestorEl
+	 * @param {HTMLElement} targetEl
 	 * @param {{includeNthChild?: boolean}} [options]
 	 * @returns {{descendant: string, child: string}}
 	 */
@@ -390,7 +394,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		let guard = 0;
 		while (cur && cur.nodeType === 1 && guard++ < 5000) {
 			chain.push(cur);
-			if (cur === ancestorEl) break;
+			if (cur === ancestorEl || !cur.parentElement) break;
 			cur = cur.parentElement;
 		}
 		if (chain[chain.length - 1] !== ancestorEl) {
@@ -424,9 +428,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	// Show ancestor menu for PATH copying (between chosen ancestor and originalTargetEl)
 	/**
 	 * Show ancestor menu that copies selector paths (descendant and child forms).
-	 * @param {Element} targetEl
+	 * @param {HTMLElement} targetEl
 	 * @param {MouseEvent} mouseEvt
-	 * @param {Element} originalTargetEl
+	 * @param {HTMLElement} originalTargetEl
 	 */
 	_openMenuForPath(targetEl, mouseEvt, originalTargetEl) {
 		const chain = this._buildAncestry(targetEl, document.body);
@@ -532,7 +536,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	// Choose a selector for a node
 	/**
 	 * Build a selector for a node using id, classes, tag, and optional :nth-child.
-	 * @param {Element} node
+	 * @param {HTMLElement} node
 	 * @param {{useIds?: boolean, useClasses?: boolean, includeTagIfNoClasses?: boolean, includeNthChild?: boolean}} opts
 	 * @returns {string}
 	 */
@@ -549,8 +553,8 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (opts.includeNthChild) {
 			const parent = node.parentElement;
 			if (parent) {
-				let i = 1, sib = node;
-				while ((sib = sib.previousElementSibling)) i++;
+				let i = 1,  /** @type {Element | null} */ sib = node;
+				while ((sib = sib?.previousElementSibling)) i++;
 				sel += ":nth-child(" + i + ")";
 			}
 		}
@@ -559,10 +563,21 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 	/**
 	 * Build a nested CSS tree starting at root and including all descendants.
-	 * For each level, emit two content lines:
-	 *  - descendant path: "A B C"
-	 *  - child path:      "A > B > C"
+	 * For each level, emits selector metadata and sampled text content.
 	 * Copies the result to clipboard, shows a Notice, and returns the text.
+	 *
+	 * @param {Element} root Root element to start from (inclusive).
+	 * @param {{
+	 *   useIds?: boolean,
+	 *   useClasses?: boolean,
+	 *   includeTagIfNoClasses?: boolean,
+	 *   includeNthChild?: boolean,
+	 *   indent?: string,
+	 *   maxDepth?: number,
+	 *   maxNodes?: number,
+	 *   skipTags?: Set<string>
+	 * }} [options]
+	 * @returns {Promise<string>} The generated nested CSS text.
 	 */
 
 	async _css(root, options) {
@@ -755,6 +770,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 	/**
 	 * Show a timed Notice via a fresh Noticer instance and register it in the plugin set.
+	 * @param {string} message Message to display in the Notice.
+	 * @param {number} timeoutMs Duration in milliseconds to keep the Notice visible.
+	 * @returns {Noticer} The created Noticer instance.
 	 */
 	_withNotice(message, timeoutMs) {
 		const n = new Noticer().show(message, timeoutMs);
