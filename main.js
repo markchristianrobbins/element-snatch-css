@@ -7,15 +7,20 @@
  * No execCommand fallback is used for clipboard.
  */
 
+
+// #region __Inits
 // @ts-check
 const Obsidian = require("obsidian");
 const { Plugin, Menu, Notice } = Obsidian;
 // @ts-ignore
 const Electron = require("electron");
+// #endregion __Inits
 
+// #region __Typedefs
 /** @typedef {import("obsidian").MenuItem} MenuItem */
+// #endregion __Typedefs
 
-
+// #region __Noticer
 /**
  * Lightweight wrapper around Obsidian Notice with auto-disposal.
  * Tracks all active instances to allow bulk cleanup on unload.
@@ -26,6 +31,7 @@ class Noticer {
 		this._t = null;
 		Noticer._all.add(this);
 	}
+	// #region __Noticer_public
 	/**
 	 * Show a Notice for a limited time.
 	 * @param {string} message
@@ -55,26 +61,62 @@ class Noticer {
 		Noticer._all.delete(this);
 		return this;
 	}
-	/** @returns {boolean} Whether a Notice is currently visible. */
-	isActive() { return !!this._n; }
-	/** @returns {Noticer[]} Snapshot of all active Noticer instances. */
-	static getNoticers() { return Array.from(Noticer._all); }
-	/** Dispose all active Noticer instances. */
-	static disposeAll() { for (const n of Array.from(Noticer._all)) { try { n.dispose(); } catch { } } }
+	/**
+	 * @returns {boolean} Whether a Notice is currently visible.
+	 */
+	isActive() {
+		return !!this._n;
+	}
+	// #endregion __Noticer_public
+
+	// #region __Noticer_static
+	/**
+	 * @static
+	 * @returns {Noticer[]} Snapshot of all active Noticer instances.
+	 */
+	static getNoticers() {
+		return Array.from(Noticer._all);
+	}
+	/**
+	 * Dispose all active Noticer instances.
+	 * @static
+	 */
+	static disposeAll() {
+		for (const n of Array.from(Noticer._all)) {
+			try { n.dispose(); } catch { }
+		}
+	}
 }
+	// #endregion __Noticer_static
 Noticer._all = new Set();
+// #endregion __Noticer
 
-
+// #region __Plugin
 /**
  * Obsidian plugin that generates nested CSS selectors for a clicked element.
  * Ctrl/Cmd+Middle opens the CSS menu; Ctrl/Cmd+Shift+Middle opens the path menu.
  */
 module.exports = class ElementSnatchCssPlugin extends Plugin {
-	/** @type {Set<Noticer>} */
+
+	// #region __Plugin_private_members
+	/**
+	 * @private
+	 * @member
+	 * @type {Set<Noticer>}
+	 */
 	_noticers = new Set();
-	/** @type {boolean} */
+	/**
+	 * @private
+	 * @member
+	 * @type {boolean}
+	 */
 	_debug = false;
-	/** Plugin entry point: bind mouse handler and register DOM event. */
+	// #endregion __Plugin_private_members
+
+	// #region __Plugin_events
+	/**
+	 * Plugin entry point: bind mouse handler and register DOM event.
+	 */
 	onload() {
 		this._debug = false; // set to true in dev console to enable verbose logging
 		this._onMouseDown = this._onMouseDown.bind(this);
@@ -82,18 +124,22 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (this._debug) console.log("[element-snatch-css] loaded");
 	}
 
-	/** Plugin teardown: dispose notices and highlighter. */
+	/**
+	 * Plugin teardown: dispose notices and highlighter.
+	 */
 	onunload() {
 		try { Noticer.disposeAll(); } catch (e) { if (this._debug) console.error(e); }
 		if (this._debug) console.log("[element-snatch-css] unloaded");
 		this._disposeHighlighter();
 	}
+	// #endregion __Plugin_events
 
-	// Handle Ctrl + Middle click
 	/**
 	 * Handle Ctrl/Cmd + Middle mouse clicks to open menus.
 	 * - Ctrl/Cmd + Middle: CSS menu
 	 * - Ctrl/Cmd + Shift + Middle: Path menu
+	 * @private
+	 * @event
 	 * @param {MouseEvent} e
 	 */
 	_onMouseDown(e) {
@@ -116,15 +162,14 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 				const target = (e.target instanceof HTMLElement ? (e.target.closest("*") || e.target) : document.body);
 				this._openMenuForPath(target, e, target);
 			}
-
 		} catch (err) {
 			console.error("[element-snatch-css] onMouseDown error:", err);
 		}
 	}
 
-	// Build ancestry array body -> ... -> node
 	/**
 	 * Build ancestors from stopAt (inclusive) down to node (inclusive).
+	 * @private
 	 * @param {HTMLElement} node
 	 * @param {HTMLElement} [stopAt=document.body]
 	 * @returns {HTMLElement[]}
@@ -142,9 +187,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		return chain;
 	}
 
-	// Human-readable label: tag#id.class1.class2 [+N]
 	/**
 	 * Build a compact human-readable label for a node (e.g., tag#id.cls1.cls2 [+N]).
+	 * @private
 	 * @param {Element} node
 	 * @param {number} [maxClasses=3]
 	 * @param {boolean} [includeTag=true]
@@ -165,6 +210,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	/**
 	 * Ensure a singleton <style> for highlighter animations is present.
 	 * Contains a hue-rotate keyframes animation.
+	 * @private
 	 */
 	_ensureHighlighterStyle() {
 		// Prefer reusing an existing style element by id to avoid duplicates across reloads
@@ -192,6 +238,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	 * Create (or return) the singleton highlighter div.
 	 * The highlighter is positioned using getBoundingClientRect() and uses
 	 * transitions for motion with ease-in-out.
+	 * @private
 	 */
 	_ensureHighlighter() {
 		if (this._hiDiv && document.body.contains(this._hiDiv)) return this._hiDiv;
@@ -217,6 +264,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 	/**
 	 * Position and show the highlighter over a given element.
+	 * @private
 	 * @param {Element} el
 	 */
 	_placeHighlighter(el) {
@@ -235,6 +283,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	/**
 	 * Remove and dispose of the highlighter and style.
 	 * Used when the menu closes.
+	 * @private
 	 */
 	_disposeHighlighter() {
 		if (this._hiDiv) {
@@ -248,10 +297,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		this._hiTarget = null;
 	}
 
-
-	// Apply or remove highlight on a DOM element
 	/**
 	 * Toggle the overlay highlighter and optional contrast bump on a target element.
+	 * @private
 	 * @param {HTMLElement} el
 	 * @param {boolean} on
 	 */
@@ -288,9 +336,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 	}
 
-	// Show Menu at mouse position with body at top and target at bottom
 	/**
 	 * Show ancestor menu that copies nested CSS for the chosen ancestor subtree.
+	 * @private
 	 * @param {HTMLElement} targetEl
 	 * @param {MouseEvent} mouseEvt
 	 * @param {HTMLElement} originalTargetEl
@@ -376,9 +424,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		}, 0);
 	}
 
-	// Build two selector strings between ancestorEl (inclusive) and targetEl (inclusive).
 	/**
 	 * Build descendant and child selector strings between ancestorEl and targetEl.
+	 * @private
 	 * @param {HTMLElement} ancestorEl
 	 * @param {HTMLElement} targetEl
 	 * @param {{includeNthChild?: boolean}} [options]
@@ -425,9 +473,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		};
 	}
 
-	// Show ancestor menu for PATH copying (between chosen ancestor and originalTargetEl)
 	/**
 	 * Show ancestor menu that copies selector paths (descendant and child forms).
+	 * @private
 	 * @param {HTMLElement} targetEl
 	 * @param {MouseEvent} mouseEvt
 	 * @param {HTMLElement} originalTargetEl
@@ -496,9 +544,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		}, 0);
 	}
 
-	// Copy helper: Electron first, then modern Web Clipboard API
 	/**
 	 * Copy text to the clipboard using Electron when available, falling back to the Web Clipboard API.
+	 * @private
 	 * @param {string} s
 	 * @returns {Promise<boolean>} Whether the copy succeeded.
 	 */
@@ -520,9 +568,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		return false;
 	}
 
-	// CSS.escape with basic fallback
 	/**
 	 * Escape an arbitrary string for safe use in a CSS selector.
+	 * @private
 	 * @param {string} str
 	 * @returns {string}
 	 */
@@ -533,9 +581,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		});
 	}
 
-	// Choose a selector for a node
 	/**
 	 * Build a selector for a node using id, classes, tag, and optional :nth-child.
+	 * @private
 	 * @param {HTMLElement} node
 	 * @param {{useIds?: boolean, useClasses?: boolean, includeTagIfNoClasses?: boolean, includeNthChild?: boolean}} opts
 	 * @returns {string}
@@ -565,7 +613,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	 * Build a nested CSS tree starting at root and including all descendants.
 	 * For each level, emits selector metadata and sampled text content.
 	 * Copies the result to clipboard, shows a Notice, and returns the text.
-	 *
+	 * @private
 	 * @param {Element} root Root element to start from (inclusive).
 	 * @param {{
 	 *   useIds?: boolean,
@@ -579,7 +627,6 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	 * }} [options]
 	 * @returns {Promise<string>} The generated nested CSS text.
 	 */
-
 	async _css(root, options) {
 		const opts = Object.assign({
 			useIds: true,
@@ -767,9 +814,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		return out;
 	}
 
-
 	/**
 	 * Show a timed Notice via a fresh Noticer instance and register it in the plugin set.
+	 * @private
 	 * @param {string} message Message to display in the Notice.
 	 * @param {number} timeoutMs Duration in milliseconds to keep the Notice visible.
 	 * @returns {Noticer} The created Noticer instance.
@@ -782,3 +829,4 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		return n;
 	}
 };
+// #endregion __Plugin
