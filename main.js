@@ -134,6 +134,59 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 	// #endregion __Plugin_events
 
+	// #region __Plugin_utils
+	/**
+	 * Show a timed Notice via a fresh Noticer instance and register it in the plugin set.
+	 * @private
+	 * @param {string} message Message to display in the Notice.
+	 * @param {number} timeoutMs Duration in milliseconds to keep the Notice visible.
+	 * @returns {Noticer} The created Noticer instance.
+	 */
+	_withNotice(message, timeoutMs) {
+		const n = new Noticer().show(message, timeoutMs);
+		this._noticers.add(n);
+		// when it disposes, remove from set (best-effort via timeout)
+		setTimeout(() => { this._noticers.delete(n); }, (Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs | 0) : 3000) + 1000);
+		return n;
+	}
+
+	/**
+	 * Copy text to the clipboard using Electron when available, falling back to the Web Clipboard API.
+	 * @private
+	 * @param {string} s
+	 * @returns {Promise<boolean>} Whether the copy succeeded.
+	 */
+	async _copyText(s) {
+		const text = String(s == null ? "" : s);
+		try {
+			const { clipboard } = Electron;
+			if (clipboard && typeof clipboard.writeText === "function") {
+				clipboard.writeText(text);
+				return true;
+			}
+		} catch (e) { if (this._debug) console.error(e); }
+		try {
+			if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+				await navigator.clipboard.writeText(text);
+				return true;
+			}
+		} catch (e) { if (this._debug) console.error(e); }
+		return false;
+	}
+
+	/**
+	 * Escape an arbitrary string for safe use in a CSS selector.
+	 * @private
+	 * @param {string} str
+	 * @returns {string}
+	 */
+	_cssEscape(str) {
+		if (window.CSS && typeof window.CSS.escape === "function") return CSS.escape(str);
+		return String(str).replace(/[^a-zA-Z0-9_-]/g, function (c) {
+			return "\\" + c.charCodeAt(0).toString(16) + " ";
+		});
+	}
+
 	/**
 	 * Handle Ctrl/Cmd + Middle mouse clicks to open menus.
 	 * - Ctrl/Cmd + Middle: CSS menu
@@ -166,47 +219,9 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 			console.error("[element-snatch-css] onMouseDown error:", err);
 		}
 	}
+	// #endregion __Plugin_utils
 
-	/**
-	 * Build ancestors from stopAt (inclusive) down to node (inclusive).
-	 * @private
-	 * @param {HTMLElement} node
-	 * @param {HTMLElement} [stopAt=document.body]
-	 * @returns {HTMLElement[]}
-	 */
-	_buildAncestry(node, stopAt = document.body) {
-		const chain = [];
-		let cur = node;
-		let guard = 0;
-		while (cur && cur.nodeType === 1 && guard++ < 2000) {
-			chain.push(cur);
-			if (cur === stopAt || !cur.parentElement) break;
-			cur = cur.parentElement;
-		}
-		chain.reverse(); // body first
-		return chain;
-	}
-
-	/**
-	 * Build a compact human-readable label for a node (e.g., tag#id.cls1.cls2 [+N]).
-	 * @private
-	 * @param {Element} node
-	 * @param {number} [maxClasses=3]
-	 * @param {boolean} [includeTag=true]
-	 * @returns {string}
-	 */
-	_labelFor(node, maxClasses = 3, includeTag = true) {
-		const tag = includeTag ? node.tagName.toLowerCase() : "";
-		const id = node.id ? "#" + node.id : "";
-		const classes = node.classList ? Array.from(node.classList).filter(Boolean) : [];
-		const shown = classes.slice(0, maxClasses);
-		const extra = classes.length - shown.length;
-		const cls = shown.length ? "." + shown.join(".") : "";
-		const more = extra > 0 ? " [+" + extra + "]" : "";
-		const base = (tag + id + cls) || node.tagName.toLowerCase();
-		return base + more;
-	}
-
+	// #region __Plugin_highlight
 	/**
 	 * Ensure a singleton <style> for highlighter animations is present.
 	 * Contains a hue-rotate keyframes animation.
@@ -335,97 +350,44 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		}
 
 	}
+	// #endregion __Plugin_highlight
 
+	// #region __Plugin_core
 	/**
-	 * Show ancestor menu that copies nested CSS for the chosen ancestor subtree.
+	 * Build a selector for a node using id, classes, tag, and optional :nth-child.
+	 * ### Callers
+	 * - {@link _css}
+	 * - {@link _buildPathsBetween}
 	 * @private
-	 * @param {HTMLElement} targetEl
-	 * @param {MouseEvent} mouseEvt
-	 * @param {HTMLElement} originalTargetEl
+	 * @param {HTMLElement} node
+	 * @param {{useIds?: boolean, useClasses?: boolean, includeTagIfNoClasses?: boolean, includeNthChild?: boolean}} opts
+	 * @returns {string}
 	 */
-	_openMenuForCss(targetEl, mouseEvt, originalTargetEl) {
-		const chain = this._buildAncestry(targetEl, document.body);
-		if (!chain.length) return;
+	_selectorFor(node, opts) {
+		if (opts.useIds && node.id) return "#" + this._cssEscape(node.id);
 
-		const menu = new Menu();
-		// Title label (enabled no-op so themes can't hide it)
-		/** @param {import("obsidian").MenuItem} item */
-		menu.addItem((item) => {
-			try {
-				item.setTitle("📸 CSS menu (Ctrl+Middle)");
-				item.setIcon("code");
-			} catch (err) {
-				console.error("[element-snatch-css] addItem failed", err);
+		if (opts.useClasses && node.classList && node.classList.length) {
+			const classes = Array.from(node.classList).filter(Boolean).map((c) => this._cssEscape(c));
+			if (classes.length) return "." + classes.join(".");
+		}
+
+		let sel = opts.includeTagIfNoClasses ? node.tagName.toLowerCase() : "*";
+
+		if (opts.includeNthChild) {
+			const parent = node.parentElement;
+			if (parent) {
+				let i = 1,  /** @type {Element | null} */ sib = node;
+				while ((sib = sib?.previousElementSibling)) i++;
+				sel += ":nth-child(" + i + ")";
 			}
-		});
-		const clearAll = () => { chain.forEach((/** HTMLElement */n) => this._highlight(/** HTMLElement */n, false)); this._disposeHighlighter(); };
-
-		// Ancestors
-		for (const el of chain) {
-			menu.addItem((item) => {
-				try {
-					const label = this._labelFor(el, 3, true);
-					item.setTitle(label);
-					item.setIcon?.("chevrons-right");
-
-					// Safe tooltip build
-					let tip = "";
-					try {
-						const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
-						tip = _pathsForTip.child.replace(/\s+/g, ' ').replace(/>/g, '\n>').trim();
-					} catch (e) {
-						if (this._debug) console.warn("[element-snatch-css] tooltip build failed", e);
-					}
-
-					item.onClick(async () => {
-						clearAll();
-						await this._css(el, {
-							includeNthChild: false,
-							indent: "\t",
-							maxDepth: Infinity,
-							maxNodes: 5000
-						});
-					});
-
-					// @ts-ignore
-					const dom = item.dom; // || item.domEl || item._dom || item.buttonEl || item.containerEl;
-					if (dom) {
-						if (tip) dom.setAttribute("title", tip);
-						dom.addEventListener("mouseenter", () => this._highlight(el, true));
-						dom.addEventListener("mouseleave", () => this._highlight(el, false));
-					}
-				} catch (err) {
-					console.error("[element-snatch-css] addItem failed", err);
-					// Fallback: show *something* so the menu isn't empty
-					item.setTitle(this._labelFor(el, 1, true));
-				}
-			});
 		}
-
-		if (typeof menu.showAtMouseEvent === "function") {
-			menu.showAtMouseEvent(mouseEvt);
-		} else if (typeof menu.showAtPosition === "function") {
-			menu.showAtPosition({ x: mouseEvt.clientX, y: mouseEvt.clientY });
-		} else {
-			menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-		}
-
-		// Cleanup highlights when the menu disappears
-		setTimeout(() => {
-			const menuEl = document.querySelector(".menu");
-			if (!menuEl) return;
-			const obs = new MutationObserver(() => {
-				if (!document.body.contains(menuEl)) {
-					try { obs.disconnect(); } catch (e) { if (this._debug) console.error(e); }
-					clearAll();
-				}
-			});
-			obs.observe(document.body, { childList: true, subtree: true });
-		}, 0);
+		return sel;
 	}
 
 	/**
 	 * Build descendant and child selector strings between ancestorEl and targetEl.
+	 * ### Callers
+	 * - {@link _openMenuForPath}
 	 * @private
 	 * @param {HTMLElement} ancestorEl
 	 * @param {HTMLElement} targetEl
@@ -474,145 +436,58 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 	}
 
 	/**
-	 * Show ancestor menu that copies selector paths (descendant and child forms).
-	 * @private
-	 * @param {HTMLElement} targetEl
-	 * @param {MouseEvent} mouseEvt
-	 * @param {HTMLElement} originalTargetEl
-	 */
-	_openMenuForPath(targetEl, mouseEvt, originalTargetEl) {
-		const chain = this._buildAncestry(targetEl, document.body);
-		if (!chain.length) return;
-
-		const menu = new Menu();
-		// Title label (enabled no-op so themes don't hide disabled items)
-		menu.addItem((item) => {
-			item.setTitle("🛣️ Path menu (Ctrl+Shift+Middle)");
-			//item.setIcon("path");
-			//item.setDisabled(true);
-			// const _dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
-			// if (_dom) { _dom.classList.add('esc-menu-title'); _dom.setAttribute('aria-disabled','true'); }
-		});
-		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
-
-		for (const el of chain) {
-			const label = this._labelFor(el, 3, true);
-			menu.addItem((item) => {
-				item.setTitle(label);
-				item.setIcon("chevrons-right");
-				item.onClick(async () => {
-					clearAll();
-					const paths = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
-					const text = paths.descendant + '\n' + paths.child + '\n';
-					const ok = await this._copyText(text);
-					try { this._withNotice(ok ? "Path copied" : "Copy failed", ok ? 5000 : 10000); } catch (e) { if (this._debug) console.error(e); }
-					if (!ok && this._debug) console.log(text);
-				});
-
-				// @ts-ignore
-				const dom = item?.dom; // || item.domEl || item._dom || item.buttonEl || item.containerEl;
-				if (dom) {
-					const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
-					const desc = _pathsForTip.descendant.replace(/\s+/g, ' ').replace(/ /g, ' \n').trim();
-					const child = _pathsForTip.child.replace(/\s+/g, ' ').replace(/ >/g, ' \n>').trim();
-					dom.setAttribute("title", ("== CSS SELECTORS ==\n\nDescendant form:\n" + desc + "\n\n" + "Child form:\n" + child));
-					dom.addEventListener("mouseenter", () => this._highlight(el, true));
-					dom.addEventListener("mouseleave", () => this._highlight(el, false));
-				}
-			});
-		}
-
-		if (typeof menu.showAtMouseEvent === "function") {
-			menu.showAtMouseEvent(mouseEvt);
-		} else if (typeof menu.showAtPosition === "function") {
-			menu.showAtPosition({ x: mouseEvt.clientX, y: mouseEvt.clientY });
-		} else {
-			menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-		}
-
-		// Cleanup highlights when the menu disappears
-		setTimeout(() => {
-			const menuEl = document.querySelector(".menu");
-			if (!menuEl) return;
-			const obs = new MutationObserver(() => {
-				if (!document.body.contains(menuEl)) {
-					try { obs.disconnect(); } catch (e) { if (this._debug) console.error(e); }
-					clearAll();
-				}
-			});
-			obs.observe(document.body, { childList: true, subtree: true });
-		}, 0);
-	}
-
-	/**
-	 * Copy text to the clipboard using Electron when available, falling back to the Web Clipboard API.
-	 * @private
-	 * @param {string} s
-	 * @returns {Promise<boolean>} Whether the copy succeeded.
-	 */
-	async _copyText(s) {
-		const text = String(s == null ? "" : s);
-		try {
-			const { clipboard } = Electron;
-			if (clipboard && typeof clipboard.writeText === "function") {
-				clipboard.writeText(text);
-				return true;
-			}
-		} catch (e) { if (this._debug) console.error(e); }
-		try {
-			if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-				await navigator.clipboard.writeText(text);
-				return true;
-			}
-		} catch (e) { if (this._debug) console.error(e); }
-		return false;
-	}
-
-	/**
-	 * Escape an arbitrary string for safe use in a CSS selector.
-	 * @private
-	 * @param {string} str
-	 * @returns {string}
-	 */
-	_cssEscape(str) {
-		if (window.CSS && typeof window.CSS.escape === "function") return CSS.escape(str);
-		return String(str).replace(/[^a-zA-Z0-9_-]/g, function (c) {
-			return "\\" + c.charCodeAt(0).toString(16) + " ";
-		});
-	}
-
-	/**
-	 * Build a selector for a node using id, classes, tag, and optional :nth-child.
+	 * Build ancestors from stopAt (inclusive) down to node (inclusive).
+	 * ### Callers
+	 * - {@link _buildPathsBetween}
+	 * - {@link _openMenuForPath}
+	 * - {@link _openMenuForCss}
 	 * @private
 	 * @param {HTMLElement} node
-	 * @param {{useIds?: boolean, useClasses?: boolean, includeTagIfNoClasses?: boolean, includeNthChild?: boolean}} opts
+	 * @param {HTMLElement} [stopAt=document.body]
+	 * @returns {HTMLElement[]}
+	 */
+	_buildAncestry(node, stopAt = document.body) {
+		const chain = [];
+		let cur = node;
+		let guard = 0;
+		while (cur && cur.nodeType === 1 && guard++ < 2000) {
+			chain.push(cur);
+			if (cur === stopAt || !cur.parentElement) break;
+			cur = cur.parentElement;
+		}
+		chain.reverse(); // body first
+		return chain;
+	}
+
+	/**
+	 * Build a compact human-readable label for a node (e.g., tag#id.cls1.cls2 [+N]).
+	 * ### Callers
+	 * - {@link _openMenuForPath}
+	 * - {@link _openMenuForCss}
+	 * @private
+	 * @param {Element} node
+	 * @param {number} [maxClasses=3]
+	 * @param {boolean} [includeTag=true]
 	 * @returns {string}
 	 */
-	_selectorFor(node, opts) {
-		if (opts.useIds && node.id) return "#" + this._cssEscape(node.id);
-
-		if (opts.useClasses && node.classList && node.classList.length) {
-			const classes = Array.from(node.classList).filter(Boolean).map((c) => this._cssEscape(c));
-			if (classes.length) return "." + classes.join(".");
-		}
-
-		let sel = opts.includeTagIfNoClasses ? node.tagName.toLowerCase() : "*";
-
-		if (opts.includeNthChild) {
-			const parent = node.parentElement;
-			if (parent) {
-				let i = 1,  /** @type {Element | null} */ sib = node;
-				while ((sib = sib?.previousElementSibling)) i++;
-				sel += ":nth-child(" + i + ")";
-			}
-		}
-		return sel;
+	_labelFor(node, maxClasses = 3, includeTag = true) {
+		const tag = includeTag ? node.tagName.toLowerCase() : "";
+		const id = node.id ? "#" + node.id : "";
+		const classes = node.classList ? Array.from(node.classList).filter(Boolean) : [];
+		const shown = classes.slice(0, maxClasses);
+		const extra = classes.length - shown.length;
+		const cls = shown.length ? "." + shown.join(".") : "";
+		const more = extra > 0 ? " [+" + extra + "]" : "";
+		const base = (tag + id + cls) || node.tagName.toLowerCase();
+		return base + more;
 	}
 
 	/**
 	 * Build a nested CSS tree starting at root and including all descendants.
 	 * For each level, emits selector metadata and sampled text content.
 	 * Copies the result to clipboard, shows a Notice, and returns the text.
+	 * ### Callers
+	 * - {@link _openMenuForCss}
 	 * @private
 	 * @param {Element} root Root element to start from (inclusive).
 	 * @param {{
@@ -813,20 +688,173 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		if (!ok && this._debug) console.log(out);
 		return out;
 	}
+	// #endregion __Plugin_core
+
+	// #region __Plugin_menus
+	/**
+	 * Show ancestor menu that copies nested CSS for the chosen ancestor subtree.
+	 * ### Callers
+	 * - {@link _onMouseDown}
+	 * @private
+	 * @param {HTMLElement} targetEl
+	 * @param {MouseEvent} mouseEvt
+	 * @param {HTMLElement} originalTargetEl
+	 */
+	_openMenuForCss(targetEl, mouseEvt, originalTargetEl) {
+		const chain = this._buildAncestry(targetEl, document.body);
+		if (!chain.length) return;
+
+		const menu = new Menu();
+		// Title label (enabled no-op so themes can't hide it)
+		/** @param {import("obsidian").MenuItem} item */
+		menu.addItem((item) => {
+			try {
+				item.setTitle("📸 CSS menu (Ctrl+Middle)");
+				item.setIcon("code");
+			} catch (err) {
+				console.error("[element-snatch-css] addItem failed", err);
+			}
+		});
+		const clearAll = () => { chain.forEach((/** HTMLElement */n) => this._highlight(/** HTMLElement */n, false)); this._disposeHighlighter(); };
+
+		// Ancestors
+		for (const el of chain) {
+			menu.addItem((item) => {
+				try {
+					const label = this._labelFor(el, 3, true);
+					item.setTitle(label);
+					item.setIcon?.("chevrons-right");
+
+					// Safe tooltip build
+					let tip = "";
+					try {
+						const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
+						tip = _pathsForTip.child.replace(/\s+/g, ' ').replace(/>/g, '\n>').trim();
+					} catch (e) {
+						if (this._debug) console.warn("[element-snatch-css] tooltip build failed", e);
+					}
+
+					item.onClick(async () => {
+						clearAll();
+						await this._css(el, {
+							includeNthChild: false,
+							indent: "\t",
+							maxDepth: Infinity,
+							maxNodes: 5000
+						});
+					});
+
+					// @ts-ignore
+					const dom = item.dom; // || item.domEl || item._dom || item.buttonEl || item.containerEl;
+					if (dom) {
+						if (tip) dom.setAttribute("title", tip);
+						dom.addEventListener("mouseenter", () => this._highlight(el, true));
+						dom.addEventListener("mouseleave", () => this._highlight(el, false));
+					}
+				} catch (err) {
+					console.error("[element-snatch-css] addItem failed", err);
+					// Fallback: show *something* so the menu isn't empty
+					item.setTitle(this._labelFor(el, 1, true));
+				}
+			});
+		}
+
+		if (typeof menu.showAtMouseEvent === "function") {
+			menu.showAtMouseEvent(mouseEvt);
+		} else if (typeof menu.showAtPosition === "function") {
+			menu.showAtPosition({ x: mouseEvt.clientX, y: mouseEvt.clientY });
+		} else {
+			menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+		}
+
+		// Cleanup highlights when the menu disappears
+		setTimeout(() => {
+			const menuEl = document.querySelector(".menu");
+			if (!menuEl) return;
+			const obs = new MutationObserver(() => {
+				if (!document.body.contains(menuEl)) {
+					try { obs.disconnect(); } catch (e) { if (this._debug) console.error(e); }
+					clearAll();
+				}
+			});
+			obs.observe(document.body, { childList: true, subtree: true });
+		}, 0);
+	}
 
 	/**
-	 * Show a timed Notice via a fresh Noticer instance and register it in the plugin set.
+	 * Show ancestor menu that copies selector paths (descendant and child forms).
+	 * ### Callers
+	 * - {@link _onMouseDown}
 	 * @private
-	 * @param {string} message Message to display in the Notice.
-	 * @param {number} timeoutMs Duration in milliseconds to keep the Notice visible.
-	 * @returns {Noticer} The created Noticer instance.
+	 * @param {HTMLElement} targetEl
+	 * @param {MouseEvent} mouseEvt
+	 * @param {HTMLElement} originalTargetEl
 	 */
-	_withNotice(message, timeoutMs) {
-		const n = new Noticer().show(message, timeoutMs);
-		this._noticers.add(n);
-		// when it disposes, remove from set (best-effort via timeout)
-		setTimeout(() => { this._noticers.delete(n); }, (Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs | 0) : 3000) + 1000);
-		return n;
+	_openMenuForPath(targetEl, mouseEvt, originalTargetEl) {
+		const chain = this._buildAncestry(targetEl, document.body);
+		if (!chain.length) return;
+
+		const menu = new Menu();
+		// Title label (enabled no-op so themes don't hide disabled items)
+		menu.addItem((item) => {
+			item.setTitle("🛣️ Path menu (Ctrl+Shift+Middle)");
+			//item.setIcon("path");
+			//item.setDisabled(true);
+			// const _dom = item.dom || item.domEl || item._dom || item.buttonEl || item.containerEl;
+			// if (_dom) { _dom.classList.add('esc-menu-title'); _dom.setAttribute('aria-disabled','true'); }
+		});
+		const clearAll = () => { chain.forEach((n) => this._highlight(n, false)); this._disposeHighlighter(); };
+
+		for (const el of chain) {
+			const label = this._labelFor(el, 3, true);
+			menu.addItem((item) => {
+				item.setTitle(label);
+				item.setIcon("chevrons-right");
+				item.onClick(async () => {
+					clearAll();
+					const paths = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
+					const text = paths.descendant + '\n' + paths.child + '\n';
+					const ok = await this._copyText(text);
+					try { this._withNotice(ok ? "Path copied" : "Copy failed", ok ? 5000 : 10000); } catch (e) { if (this._debug) console.error(e); }
+					if (!ok && this._debug) console.log(text);
+				});
+
+				// @ts-ignore
+				const dom = item?.dom; // || item.domEl || item._dom || item.buttonEl || item.containerEl;
+				if (dom) {
+					const _pathsForTip = this._buildPathsBetween(el, originalTargetEl, { includeNthChild: false });
+					const desc = _pathsForTip.descendant.replace(/\s+/g, ' ').replace(/ /g, ' \n').trim();
+					const child = _pathsForTip.child.replace(/\s+/g, ' ').replace(/ >/g, ' \n>').trim();
+					dom.setAttribute("title", ("== CSS SELECTORS ==\n\nDescendant form:\n" + desc + "\n\n" + "Child form:\n" + child));
+					dom.addEventListener("mouseenter", () => this._highlight(el, true));
+					dom.addEventListener("mouseleave", () => this._highlight(el, false));
+				}
+			});
+		}
+
+		if (typeof menu.showAtMouseEvent === "function") {
+			menu.showAtMouseEvent(mouseEvt);
+		} else if (typeof menu.showAtPosition === "function") {
+			menu.showAtPosition({ x: mouseEvt.clientX, y: mouseEvt.clientY });
+		} else {
+			menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+		}
+
+		// Cleanup highlights when the menu disappears
+		setTimeout(() => {
+			const menuEl = document.querySelector(".menu");
+			if (!menuEl) return;
+			const obs = new MutationObserver(() => {
+				if (!document.body.contains(menuEl)) {
+					try { obs.disconnect(); } catch (e) { if (this._debug) console.error(e); }
+					clearAll();
+				}
+			});
+			obs.observe(document.body, { childList: true, subtree: true });
+		}, 0);
 	}
+	// #endregion __Plugin_menus
+
+
 };
 // #endregion __Plugin
