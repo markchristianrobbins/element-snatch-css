@@ -2,7 +2,7 @@
  * Element Snatch CSS
  * Ctrl + Shift + Middle-click opens a Menu listing ancestors from <body> down to the clicked element.
  * Hovering a menu item highlights its element. Clicking generates nested CSS from that element
- * (including all descendants) and copies it to the clipboard.
+ * (including all descendants) and copies it to the clipboard..
  *
  * No execCommand fallback is used for clipboard.
  */
@@ -13,6 +13,7 @@ const { Plugin, Menu, Notice } = Obsidian;
 // @ts-ignore
 const Electron = require("electron");
 
+/** @typedef {import("obsidian").MenuItem} MenuItem */
 
 
 /**
@@ -28,10 +29,10 @@ class Noticer {
 	/**
 	 * Show a Notice for a limited time.
 	 * @param {string} message
-	 * @param {number} [timeout=3000] Milliseconds to show; defaults to 3000.
+	 * @param {number} [timeout = 0] Milliseconds to show; defaults to 3000.
 	 * @returns {this}
 	 */
-	show(message, timeout = 3000) {
+	show(message, timeout = 0) {
 		const ms = Number.isFinite(timeout) ? Math.max(0, timeout | 0) : 3000;
 		// do not dispose the instance here (which would drop it from _all)
 		// instead, hide any existing Notice and clear the timer
@@ -577,7 +578,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 		}, options || {});
 
 		if (!root || root.nodeType !== 1) {
-			if (this._debug) console.warn("[element-snatch-css] _css called without a valid element");
+			console.warn("[element-snatch-css] _css called without a valid element");
 			return "";
 		}
 
@@ -631,7 +632,7 @@ module.exports = class ElementSnatchCssPlugin extends Plugin {
 
 			const curSel = pathSelectors[pathSelectors.length - 1];
 			let block = "";
-			block += opts.indent.repeat(depth) + curSel + " {\n";
+			block += opts.indent.repeat(depth) + curSel + "{\n";
 
 			// First two content lines only
 			const descPath = pathSelectors.join(" ");
